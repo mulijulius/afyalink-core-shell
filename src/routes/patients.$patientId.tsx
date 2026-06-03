@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getPatient, initials } from "@/data/patients";
+import { getPatient, initials, type Patient } from "@/data/patients";
 
 export const Route = createFileRoute("/patients/$patientId")({
   head: ({ params }) => ({
@@ -36,7 +36,7 @@ export const Route = createFileRoute("/patients/$patientId")({
 });
 
 function PatientProfile() {
-  const { patient } = Route.useLoaderData();
+  const { patient } = Route.useLoaderData() as { patient: Patient };
 
   return (
     <div className="space-y-6">
