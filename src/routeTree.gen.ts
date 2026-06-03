@@ -18,6 +18,7 @@ import { Route as LaboratoryRouteImport } from './routes/laboratory'
 import { Route as BillingRouteImport } from './routes/billing'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PatientsPatientIdRouteImport } from './routes/patients.$patientId'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -64,6 +65,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PatientsPatientIdRoute = PatientsPatientIdRouteImport.update({
+  id: '/$patientId',
+  path: '/$patientId',
+  getParentRoute: () => PatientsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -71,10 +77,11 @@ export interface FileRoutesByFullPath {
   '/billing': typeof BillingRoute
   '/laboratory': typeof LaboratoryRoute
   '/opd-queue': typeof OpdQueueRoute
-  '/patients': typeof PatientsRoute
+  '/patients': typeof PatientsRouteWithChildren
   '/pharmacy': typeof PharmacyRoute
   '/referrals': typeof ReferralsRoute
   '/settings': typeof SettingsRoute
+  '/patients/$patientId': typeof PatientsPatientIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -82,10 +89,11 @@ export interface FileRoutesByTo {
   '/billing': typeof BillingRoute
   '/laboratory': typeof LaboratoryRoute
   '/opd-queue': typeof OpdQueueRoute
-  '/patients': typeof PatientsRoute
+  '/patients': typeof PatientsRouteWithChildren
   '/pharmacy': typeof PharmacyRoute
   '/referrals': typeof ReferralsRoute
   '/settings': typeof SettingsRoute
+  '/patients/$patientId': typeof PatientsPatientIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -94,10 +102,11 @@ export interface FileRoutesById {
   '/billing': typeof BillingRoute
   '/laboratory': typeof LaboratoryRoute
   '/opd-queue': typeof OpdQueueRoute
-  '/patients': typeof PatientsRoute
+  '/patients': typeof PatientsRouteWithChildren
   '/pharmacy': typeof PharmacyRoute
   '/referrals': typeof ReferralsRoute
   '/settings': typeof SettingsRoute
+  '/patients/$patientId': typeof PatientsPatientIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -111,6 +120,7 @@ export interface FileRouteTypes {
     | '/pharmacy'
     | '/referrals'
     | '/settings'
+    | '/patients/$patientId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -122,6 +132,7 @@ export interface FileRouteTypes {
     | '/pharmacy'
     | '/referrals'
     | '/settings'
+    | '/patients/$patientId'
   id:
     | '__root__'
     | '/'
@@ -133,6 +144,7 @@ export interface FileRouteTypes {
     | '/pharmacy'
     | '/referrals'
     | '/settings'
+    | '/patients/$patientId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -141,7 +153,7 @@ export interface RootRouteChildren {
   BillingRoute: typeof BillingRoute
   LaboratoryRoute: typeof LaboratoryRoute
   OpdQueueRoute: typeof OpdQueueRoute
-  PatientsRoute: typeof PatientsRoute
+  PatientsRoute: typeof PatientsRouteWithChildren
   PharmacyRoute: typeof PharmacyRoute
   ReferralsRoute: typeof ReferralsRoute
   SettingsRoute: typeof SettingsRoute
@@ -212,8 +224,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/patients/$patientId': {
+      id: '/patients/$patientId'
+      path: '/$patientId'
+      fullPath: '/patients/$patientId'
+      preLoaderRoute: typeof PatientsPatientIdRouteImport
+      parentRoute: typeof PatientsRoute
+    }
   }
 }
+
+interface PatientsRouteChildren {
+  PatientsPatientIdRoute: typeof PatientsPatientIdRoute
+}
+
+const PatientsRouteChildren: PatientsRouteChildren = {
+  PatientsPatientIdRoute: PatientsPatientIdRoute,
+}
+
+const PatientsRouteWithChildren = PatientsRoute._addFileChildren(
+  PatientsRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -221,7 +252,7 @@ const rootRouteChildren: RootRouteChildren = {
   BillingRoute: BillingRoute,
   LaboratoryRoute: LaboratoryRoute,
   OpdQueueRoute: OpdQueueRoute,
-  PatientsRoute: PatientsRoute,
+  PatientsRoute: PatientsRouteWithChildren,
   PharmacyRoute: PharmacyRoute,
   ReferralsRoute: ReferralsRoute,
   SettingsRoute: SettingsRoute,
@@ -229,3 +260,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
