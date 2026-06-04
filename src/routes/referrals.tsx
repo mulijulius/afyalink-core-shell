@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { ChevronDown, FileText, Printer, Search, Send, Share2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -285,8 +285,8 @@ function ReferralTracker() {
               {rows.map((r) => {
                 const open = expanded === r.id;
                 return (
-                  <>
-                    <TableRow key={r.id} className="cursor-pointer" onClick={() => setExpanded(open ? null : r.id)}>
+                  <Fragment key={r.id}>
+                    <TableRow className="cursor-pointer" onClick={() => setExpanded(open ? null : r.id)}>
                       <TableCell><ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} /></TableCell>
                       <TableCell className="font-mono text-xs">{r.id}</TableCell>
                       <TableCell className="font-medium">{r.patient}</TableCell>
@@ -296,7 +296,7 @@ function ReferralTracker() {
                       <TableCell><Badge variant="outline" className={statusClass(r.status)}>{r.status}</Badge></TableCell>
                     </TableRow>
                     {open && (
-                      <TableRow key={r.id + "-x"} className="bg-muted/30 hover:bg-muted/30">
+                      <TableRow className="bg-muted/30 hover:bg-muted/30">
                         <TableCell />
                         <TableCell colSpan={6} className="py-4">
                           <div className="space-y-2 text-sm">
@@ -318,7 +318,7 @@ function ReferralTracker() {
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </TableBody>
