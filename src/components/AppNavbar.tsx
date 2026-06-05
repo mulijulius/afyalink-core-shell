@@ -1,10 +1,20 @@
-import { Bell } from "lucide-react";
+import { Bell, LogOut } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useAuth } from "@/lib/auth";
 
 export function AppNavbar() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const onLogout = () => {
+    logout();
+    navigate({ to: "/login" });
+  };
+
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b bg-background px-3 sm:px-4">
       <SidebarTrigger />
@@ -26,19 +36,22 @@ export function AppNavbar() {
         <div className="flex items-center gap-2">
           <Avatar className="h-8 w-8">
             <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-              DM
+              {user?.initials ?? "DM"}
             </AvatarFallback>
           </Avatar>
           <div className="hidden flex-col leading-tight sm:flex">
-            <span className="text-sm font-medium">Dr. Mwangi</span>
+            <span className="text-sm font-medium">{user?.name ?? "Guest"}</span>
             <Badge
               variant="secondary"
               className="w-fit border-accent/30 bg-accent/10 px-1.5 py-0 text-[10px] font-medium text-accent"
             >
-              Clinician
+              {user?.role ?? "—"}
             </Badge>
           </div>
         </div>
+        <Button variant="ghost" size="icon" aria-label="Log out" onClick={onLogout}>
+          <LogOut className="h-5 w-5" />
+        </Button>
       </div>
     </header>
   );
