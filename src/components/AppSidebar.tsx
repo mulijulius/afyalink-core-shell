@@ -20,6 +20,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { useAuth, ALLOWED_ROUTES } from "@/lib/auth";
 
 const items = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
@@ -35,6 +36,9 @@ const items = [
 
 export function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { user } = useAuth();
+  const allowed = user ? ALLOWED_ROUTES[user.role] : items.map((i) => i.url);
+  const visible = items.filter((i) => allowed.includes(i.url));
 
   return (
     <Sidebar collapsible="icon">
@@ -55,7 +59,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {items.map((item) => {
+              {visible.map((item) => {
                 const active = pathname === item.url;
                 return (
                   <SidebarMenuItem key={item.title}>
