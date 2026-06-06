@@ -79,7 +79,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "AfyaLink HMS — Kenyatta County Hospital" },
+      { title: "AfyaLink HMS — Kapsabet County referral Hospital" },
       {
         name: "description",
         content:
@@ -88,10 +88,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "theme-color", content: "#0057A8" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-title", content: "AfyaLink" },
-      { property: "og:title", content: "AfyaLink HMS" },
-      { property: "og:description", content: "Hospital Management System for Kenya." },
+      { property: "og:title", content: "AfyaLink HMS — Kapsabet County referral Hospital" },
+      { property: "og:description", content: "AfyaLink HMS is a foundational Hospital Management System for Kenya, built with React and Tailwind CSS." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "AfyaLink HMS — Kapsabet County referral Hospital" },
+      { name: "description", content: "AfyaLink HMS is a foundational Hospital Management System for Kenya, built with React and Tailwind CSS." },
+      { name: "twitter:description", content: "AfyaLink HMS is a foundational Hospital Management System for Kenya, built with React and Tailwind CSS." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/f53c7197-ec43-4e83-ae9c-5fd7c9aa05ae/id-preview-ae0e8fe6--21576133-9a38-45b2-be66-209cbb67caca.lovable.app-1780737957152.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/f53c7197-ec43-4e83-ae9c-5fd7c9aa05ae/id-preview-ae0e8fe6--21576133-9a38-45b2-be66-209cbb67caca.lovable.app-1780737957152.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
