@@ -1,0 +1,19 @@
+{
+  "name": "AfyaLink HMS",
+  "short_name": "AfyaLink",
+  "description": "Kenyatta County Hospital — Hospital Management System",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#0057A8",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
