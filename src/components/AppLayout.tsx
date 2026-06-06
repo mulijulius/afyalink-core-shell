@@ -4,6 +4,8 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppNavbar } from "@/components/AppNavbar";
 import { AccessDenied } from "@/components/AccessDenied";
+import { InstallBanner } from "@/components/InstallBanner";
+import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { Toaster } from "@/components/ui/sonner";
 import { useAuth, isRouteAllowed } from "@/lib/auth";
 
@@ -12,7 +14,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
 
-  // Public routes
   const isPublic = pathname === "/login";
 
   useEffect(() => {
@@ -22,6 +23,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   if (isPublic || !user) {
     return (
       <>
+        <OfflineIndicator />
         {children}
         <Toaster richColors position="top-right" />
       </>
@@ -34,8 +36,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
+        <InstallBanner />
+        <OfflineIndicator />
         <AppNavbar />
-        <main className="flex-1 p-4 sm:p-6">
+        <main className="flex-1 p-4 sm:p-6 print:p-0">
           {allowed ? children : <AccessDenied pathname={pathname} />}
         </main>
       </SidebarInset>
