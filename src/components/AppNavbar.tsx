@@ -23,8 +23,8 @@ export function AppNavbar() {
     <header className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b bg-background px-3 sm:px-4 print:hidden">
       <SidebarTrigger />
       <div className="hidden min-w-0 md:flex md:flex-col">
-        <h1 className="truncate text-sm font-semibold">Kenyatta County Hospital</h1>
-        <p className="text-xs text-muted-foreground">Facility · Nairobi</p>
+        <h1 className="truncate text-sm font-semibold">Kapsabet Referral Hospital</h1>
+        <p className="text-xs text-muted-foreground">Facility · Nandi County</p>
       </div>
       <div className="flex-1" />
       <GlobalSearch />

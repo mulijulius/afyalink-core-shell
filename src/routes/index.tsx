@@ -34,7 +34,7 @@ export const Route = createFileRoute("/")({
       { title: "Dashboard · AfyaLink HMS" },
       {
         name: "description",
-        content: "Clinical dashboard for Kenyatta County Hospital.",
+        content: "Clinical dashboard for Kapsabet Referral Hospital.",
       },
     ],
   }),

@@ -67,7 +67,7 @@ function SendReferralForm() {
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Referring Facility</Label>
-              <Input value="Kenyatta County Hospital" readOnly className="bg-muted/40" />
+              <Input value="Kapsabet Referral Hospital" readOnly className="bg-muted/40" />
             </div>
             <div className="space-y-1.5">
               <Label>Receiving Facility</Label>
@@ -196,7 +196,7 @@ function SendReferralForm() {
           <div className="rounded-md border bg-white p-6 text-sm leading-relaxed text-slate-800 print:border-0">
             <div className="flex items-start justify-between border-b pb-3">
               <div>
-                <p className="text-xs uppercase tracking-wider text-[#0057A8] font-semibold">Kenyatta County Hospital 🇰🇪</p>
+                <p className="text-xs uppercase tracking-wider text-[#0057A8] font-semibold">Kapsabet Referral Hospital 🇰🇪</p>
                 <p className="text-xs text-muted-foreground">Ministry of Health · Republic of Kenya</p>
               </div>
               <div className="text-right text-xs text-muted-foreground">
@@ -227,7 +227,7 @@ function SendReferralForm() {
 
             <p className="mt-6">Yours sincerely,</p>
             <p className="mt-6 font-semibold">Dr. Mwangi</p>
-            <p className="text-xs text-muted-foreground">Medical Officer · Kenyatta County Hospital</p>
+            <p className="text-xs text-muted-foreground">Medical Officer · Kapsabet Referral Hospital</p>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setPreview(false)}>Close</Button>
