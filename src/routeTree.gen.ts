@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as UsersRouteImport } from './routes/users'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ReferralsRouteImport } from './routes/referrals'
 import { Route as PharmacyRouteImport } from './routes/pharmacy'
@@ -21,6 +22,11 @@ import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PatientsPatientIdRouteImport } from './routes/patients.$patientId'
 
+const UsersRoute = UsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -88,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/pharmacy': typeof PharmacyRoute
   '/referrals': typeof ReferralsRoute
   '/settings': typeof SettingsRoute
+  '/users': typeof UsersRoute
   '/patients/$patientId': typeof PatientsPatientIdRoute
 }
 export interface FileRoutesByTo {
@@ -101,6 +108,7 @@ export interface FileRoutesByTo {
   '/pharmacy': typeof PharmacyRoute
   '/referrals': typeof ReferralsRoute
   '/settings': typeof SettingsRoute
+  '/users': typeof UsersRoute
   '/patients/$patientId': typeof PatientsPatientIdRoute
 }
 export interface FileRoutesById {
@@ -115,6 +123,7 @@ export interface FileRoutesById {
   '/pharmacy': typeof PharmacyRoute
   '/referrals': typeof ReferralsRoute
   '/settings': typeof SettingsRoute
+  '/users': typeof UsersRoute
   '/patients/$patientId': typeof PatientsPatientIdRoute
 }
 export interface FileRouteTypes {
@@ -130,6 +139,7 @@ export interface FileRouteTypes {
     | '/pharmacy'
     | '/referrals'
     | '/settings'
+    | '/users'
     | '/patients/$patientId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -143,6 +153,7 @@ export interface FileRouteTypes {
     | '/pharmacy'
     | '/referrals'
     | '/settings'
+    | '/users'
     | '/patients/$patientId'
   id:
     | '__root__'
@@ -156,6 +167,7 @@ export interface FileRouteTypes {
     | '/pharmacy'
     | '/referrals'
     | '/settings'
+    | '/users'
     | '/patients/$patientId'
   fileRoutesById: FileRoutesById
 }
@@ -170,10 +182,18 @@ export interface RootRouteChildren {
   PharmacyRoute: typeof PharmacyRoute
   ReferralsRoute: typeof ReferralsRoute
   SettingsRoute: typeof SettingsRoute
+  UsersRoute: typeof UsersRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/users': {
+      id: '/users'
+      path: '/users'
+      fullPath: '/users'
+      preLoaderRoute: typeof UsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -277,7 +297,18 @@ const rootRouteChildren: RootRouteChildren = {
   PharmacyRoute: PharmacyRoute,
   ReferralsRoute: ReferralsRoute,
   SettingsRoute: SettingsRoute,
+  UsersRoute: UsersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

@@ -1,4 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import type { Session } from "@supabase/supabase-js";
 
 export type Role =
   | "Clinician"
@@ -8,78 +10,102 @@ export type Role =
   | "Admin"
   | "Finance Officer";
 
+export type ProfileStatus = "pending" | "approved" | "rejected";
+
 export type AuthUser = {
+  id: string;
   email: string;
-  role: Role;
+  role: Role | null;
+  status: ProfileStatus;
   name: string;
   initials: string;
+  requestedRole: Role | null;
+  facility: string;
+  department: string | null;
+  phone: string | null;
 };
 
 type AuthCtx = {
   user: AuthUser | null;
-  email: string | null;
-  setEmail: (e: string | null) => void;
-  setRole: (r: Role) => void;
-  logout: () => void;
+  loading: boolean;
+  session: Session | null;
+  refresh: () => Promise<void>;
+  logout: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
-
-const ROLE_NAMES: Record<Role, { name: string; initials: string }> = {
-  Clinician:        { name: "Dr. Mwangi",       initials: "DM" },
-  Nurse:            { name: "Nurse Akinyi",     initials: "NA" },
-  Pharmacist:       { name: "Brian Otieno",     initials: "BO" },
-  "Lab Technician": { name: "Faith Achieng",    initials: "FA" },
-  Admin:            { name: "Admin Kamau",      initials: "AK" },
-  "Finance Officer":{ name: "Mercy Wairimu",    initials: "MW" },
-};
 
 export const ALLOWED_ROUTES: Record<Role, string[]> = {
   Clinician:        ["/", "/patients", "/opd-queue", "/laboratory", "/referrals", "/settings"],
   Nurse:            ["/", "/opd-queue", "/patients", "/settings"],
   Pharmacist:       ["/", "/pharmacy", "/settings"],
   "Lab Technician": ["/", "/laboratory", "/settings"],
-  Admin:            ["/", "/patients", "/opd-queue", "/pharmacy", "/laboratory", "/billing", "/referrals", "/analytics", "/settings"],
+  Admin:            ["/", "/patients", "/opd-queue", "/pharmacy", "/laboratory", "/billing", "/referrals", "/analytics", "/users", "/settings"],
   "Finance Officer":["/", "/billing", "/analytics", "/settings"],
 };
 
-const STORAGE_KEY = "afyalink-auth";
+function initialsFrom(name: string, email: string) {
+  const src = (name || email || "U").trim();
+  const parts = src.split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return src.slice(0, 2).toUpperCase();
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [email, setEmailState] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const loadProfile = async (sess: Session | null) => {
+    if (!sess?.user) { setUser(null); return; }
+    const uid = sess.user.id;
+    const [{ data: profile }, { data: roles }] = await Promise.all([
+      supabase.from("profiles").select("*").eq("id", uid).maybeSingle(),
+      supabase.from("user_roles").select("role").eq("user_id", uid),
+    ]);
+    if (!profile) { setUser(null); return; }
+    const role = (roles && roles[0]?.role) as Role | undefined;
+    const name = profile.full_name || sess.user.email || "User";
+    setUser({
+      id: uid,
+      email: profile.email ?? sess.user.email ?? "",
+      role: role ?? null,
+      status: profile.status as ProfileStatus,
+      name,
+      initials: initialsFrom(name, profile.email ?? ""),
+      requestedRole: (profile.requested_role as Role | null) ?? null,
+      facility: profile.facility ?? "Kapsabet Referral Hospital",
+      department: profile.department ?? null,
+      phone: profile.phone ?? null,
+    });
+  };
 
   useEffect(() => {
-    try {
-      const raw = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
-      if (raw) setUser(JSON.parse(raw));
-    } catch {/* noop */}
+    // 1) listener first
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+      setSession(sess);
+      // defer DB reads off the auth callback
+      setTimeout(() => { loadProfile(sess); }, 0);
+    });
+    // 2) then check existing
+    supabase.auth.getSession().then(async ({ data }) => {
+      setSession(data.session);
+      await loadProfile(data.session);
+      setLoading(false);
+    });
+    return () => sub.subscription.unsubscribe();
   }, []);
 
-  const persist = (u: AuthUser | null) => {
-    setUser(u);
-    if (typeof window !== "undefined") {
-      if (u) localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
-      else localStorage.removeItem(STORAGE_KEY);
-    }
+  const refresh = async () => { await loadProfile(session); };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setSession(null);
   };
 
   return (
-    <Ctx.Provider
-      value={{
-        user,
-        email,
-        setEmail: setEmailState,
-        setRole: (role) => {
-          const profile = ROLE_NAMES[role];
-          persist({ email: email ?? "user@kch.go.ke", role, ...profile });
-        },
-        logout: () => {
-          setEmailState(null);
-          persist(null);
-        },
-      }}
-    >
+    <Ctx.Provider value={{ user, loading, session, refresh, logout }}>
       {children}
     </Ctx.Provider>
   );
@@ -92,10 +118,7 @@ export function useAuth() {
 }
 
 export function isRouteAllowed(role: Role, pathname: string) {
-  // Always allow patient detail pages for clinicians/nurses/admins
-  if (pathname.startsWith("/patients/")) {
-    return ALLOWED_ROUTES[role].includes("/patients");
-  }
+  if (pathname.startsWith("/patients/")) return ALLOWED_ROUTES[role].includes("/patients");
   return ALLOWED_ROUTES[role].some(
     (r) => r === pathname || (r !== "/" && pathname.startsWith(r + "/")),
   );

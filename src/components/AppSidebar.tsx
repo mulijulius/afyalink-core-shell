@@ -9,6 +9,7 @@ import {
   Share2,
   BarChart3,
   Settings,
+  UserCog,
 } from "lucide-react";
 import {
   Sidebar,
@@ -31,13 +32,14 @@ const items = [
   { title: "Billing", url: "/billing", icon: Receipt },
   { title: "Referrals", url: "/referrals", icon: Share2 },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Users", url: "/users", icon: UserCog },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { user } = useAuth();
-  const allowed = user ? ALLOWED_ROUTES[user.role] : items.map((i) => i.url);
+  const allowed = user?.role ? ALLOWED_ROUTES[user.role] : items.map((i) => i.url);
   const visible = items.filter((i) => allowed.includes(i.url));
 
   return (
