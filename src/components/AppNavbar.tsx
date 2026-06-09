@@ -14,8 +14,8 @@ export function AppNavbar() {
   const navigate = useNavigate();
   const [notifOpen, setNotifOpen] = useState(false);
 
-  const onLogout = () => {
-    logout();
+  const onLogout = async () => {
+    await logout();
     navigate({ to: "/login" });
   };
 

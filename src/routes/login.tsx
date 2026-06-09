@@ -1,120 +1,154 @@
 import { useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Stethoscope, HeartPulse, Pill, FlaskConical, ShieldCheck, Wallet, Lock } from "lucide-react";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useAuth, type Role } from "@/lib/auth";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { supabase } from "@/integrations/supabase/client";
+import type { Role } from "@/lib/auth";
 
-export const Route = createFileRoute("/login")({
-  component: LoginPage,
-});
+export const Route = createFileRoute("/login")({ component: LoginPage });
 
-const ROLE_CARDS: { role: Role; icon: typeof Stethoscope; tint: string }[] = [
-  { role: "Clinician",        icon: Stethoscope,  tint: "text-[#0057A8] bg-[#0057A8]/10" },
-  { role: "Nurse",            icon: HeartPulse,   tint: "text-rose-600 bg-rose-100" },
-  { role: "Pharmacist",       icon: Pill,         tint: "text-emerald-600 bg-emerald-100" },
-  { role: "Lab Technician",   icon: FlaskConical, tint: "text-violet-600 bg-violet-100" },
-  { role: "Admin",            icon: ShieldCheck,  tint: "text-amber-600 bg-amber-100" },
-  { role: "Finance Officer",  icon: Wallet,       tint: "text-sky-600 bg-sky-100" },
-];
+const ROLES: Role[] = ["Clinician", "Nurse", "Pharmacist", "Lab Technician", "Admin", "Finance Officer"];
 
 function LoginPage() {
-  const { setEmail, setRole } = useAuth();
   const navigate = useNavigate();
-  const [step, setStep] = useState<"login" | "role">("login");
-  const [emailInput, setEmailInput] = useState("");
+  const [tab, setTab] = useState<"signin" | "signup">("signin");
+  const [busy, setBusy] = useState(false);
+
+  // sign in
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const submit = (e: React.FormEvent) => {
+  // sign up
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [department, setDepartment] = useState("");
+  const [requestedRole, setRequestedRole] = useState<Role | "">("");
+  const [suEmail, setSuEmail] = useState("");
+  const [suPassword, setSuPassword] = useState("");
+
+  const onSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailInput || !password) return;
-    setEmail(emailInput);
-    setStep("role");
+    setBusy(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setBusy(false);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Welcome back");
+    navigate({ to: "/" });
   };
 
-  const pickRole = (r: Role) => {
-    setRole(r);
+  const onSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!requestedRole) { toast.error("Please pick a role"); return; }
+    setBusy(true);
+    const { error } = await supabase.auth.signUp({
+      email: suEmail,
+      password: suPassword,
+      options: {
+        emailRedirectTo: `${window.location.origin}/`,
+        data: {
+          full_name: fullName,
+          phone,
+          department,
+          requested_role: requestedRole,
+        },
+      },
+    });
+    setBusy(false);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Account created — waiting for Admin approval");
     navigate({ to: "/" });
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-white to-emerald-50 px-4 py-10">
-      <div className="w-full max-w-3xl">
-        <div className="text-center mb-8">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center gap-2 mb-3">
-            <div className="h-12 w-12 rounded-xl bg-[#0057A8] text-white font-bold flex items-center justify-center text-xl shadow-lg">
-              A
-            </div>
+            <div className="h-12 w-12 rounded-xl bg-[#0057A8] text-white font-bold flex items-center justify-center text-xl shadow-lg">A</div>
             <span className="text-3xl" aria-label="Kenya">🇰🇪</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">AfyaLink HMS</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Facility: Kapsabet Referral Hospital
-          </p>
+          <p className="text-sm text-muted-foreground mt-1">Facility: Kapsabet Referral Hospital</p>
         </div>
 
-        {step === "login" ? (
-          <Card className="max-w-md mx-auto shadow-xl border-slate-200">
-            <CardContent className="p-6">
-              <form onSubmit={submit} className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email" type="email" required autoFocus
-                    placeholder="you@kch.go.ke"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="password">Password</Label>
-                  <Input
-                    id="password" type="password" required
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </div>
-                <Button type="submit" className="w-full bg-[#0057A8] hover:bg-[#004a8f]">
-                  Login
-                </Button>
-                <div className="text-center">
-                  <button type="button" className="text-sm text-[#0057A8] hover:underline">
-                    Forgot Password?
-                  </button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        ) : (
-          <div>
-            <div className="text-center mb-5">
-              <h2 className="text-lg font-medium">Select your role</h2>
-              <p className="text-xs text-muted-foreground">Demo mode — choose how you want to sign in.</p>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {ROLE_CARDS.map(({ role, icon: Icon, tint }) => (
-                <button
-                  key={role}
-                  onClick={() => pickRole(role)}
-                  className="group text-left rounded-xl border bg-white p-4 hover:border-[#0057A8] hover:shadow-md transition-all"
-                >
-                  <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${tint}`}>
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <div className="mt-3 font-medium">{role}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                    <Lock className="h-3 w-3" /> Role-based access
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        <Card className="shadow-xl border-slate-200">
+          <CardContent className="p-6">
+            <Tabs value={tab} onValueChange={(v) => setTab(v as "signin" | "signup")}>
+              <TabsList className="grid grid-cols-2 w-full mb-4">
+                <TabsTrigger value="signin">Sign in</TabsTrigger>
+                <TabsTrigger value="signup">Create account</TabsTrigger>
+              </TabsList>
 
-        <p className="text-center text-xs text-muted-foreground mt-8">
+              <TabsContent value="signin">
+                <form onSubmit={onSignIn} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="email">Email</Label>
+                    <Input id="email" type="email" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@kapsabet.go.ke" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="password">Password</Label>
+                    <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+                  </div>
+                  <Button type="submit" disabled={busy} className="w-full bg-[#0057A8] hover:bg-[#004a8f]">
+                    {busy ? "Signing in…" : "Login"}
+                  </Button>
+                  <div className="text-center">
+                    <Link to="/login" className="text-sm text-[#0057A8] hover:underline">Forgot Password?</Link>
+                  </div>
+                </form>
+              </TabsContent>
+
+              <TabsContent value="signup">
+                <form onSubmit={onSignUp} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="fn">Full name</Label>
+                    <Input id="fn" required value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Jane Wanjiru" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ph">Phone</Label>
+                      <Input id="ph" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+254…" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="dept">Department</Label>
+                      <Input id="dept" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="OPD" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Requested role</Label>
+                    <Select value={requestedRole} onValueChange={(v) => setRequestedRole(v as Role)}>
+                      <SelectTrigger><SelectValue placeholder="Choose role" /></SelectTrigger>
+                      <SelectContent>
+                        {ROLES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="su-email">Email</Label>
+                    <Input id="su-email" type="email" required value={suEmail} onChange={(e) => setSuEmail(e.target.value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="su-pw">Password</Label>
+                    <Input id="su-pw" type="password" required minLength={6} value={suPassword} onChange={(e) => setSuPassword(e.target.value)} />
+                  </div>
+                  <Button type="submit" disabled={busy} className="w-full bg-[#0057A8] hover:bg-[#004a8f]">
+                    {busy ? "Creating…" : "Create account"}
+                  </Button>
+                  <p className="text-xs text-muted-foreground text-center">
+                    New accounts require Admin approval before access is granted.
+                  </p>
+                </form>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+
+        <p className="text-center text-xs text-muted-foreground mt-6">
           Ministry of Health · Republic of Kenya
         </p>
       </div>
