@@ -83,7 +83,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         name: "description",
         content:
-          "AfyaLink HMS — Hospital Management System for Kenyatta County Hospital. Patients, OPD, Pharmacy, Lab, Billing, Referrals and MOH reports.",
+          "AfyaLink HMS — Hospital Management System for Kapsabet Referral Hospital. Patients, OPD, Pharmacy, Lab, Billing, Referrals and MOH reports.",
       },
       { name: "theme-color", content: "#0057A8" },
       { name: "apple-mobile-web-app-capable", content: "yes" },

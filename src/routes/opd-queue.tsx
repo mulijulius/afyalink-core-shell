@@ -225,7 +225,7 @@ function DisplayScreen({
   return (
     <div className="flex min-h-[70vh] flex-col items-center justify-between rounded-xl bg-slate-950 p-8 text-white sm:p-12">
       <div className="flex w-full items-center justify-between text-slate-300">
-        <p className="text-lg font-medium sm:text-xl">Kenyatta County Hospital</p>
+        <p className="text-lg font-medium sm:text-xl">Kapsabet Referral Hospital</p>
         <p className="font-mono text-2xl sm:text-4xl">
           {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
         </p>

@@ -51,7 +51,7 @@ function LoginPage() {
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">AfyaLink HMS</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Facility: Kenyatta County Hospital
+            Facility: Kapsabet Referral Hospital
           </p>
         </div>
 
