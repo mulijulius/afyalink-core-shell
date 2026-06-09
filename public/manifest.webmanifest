@@ -1,7 +1,7 @@
 {
   "name": "AfyaLink HMS",
   "short_name": "AfyaLink",
-  "description": "Kenyatta County Hospital — Hospital Management System",
+  "description": "Kapsabet Referral Hospital — Hospital Management System",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
