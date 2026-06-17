@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import {
   Dialog,
@@ -18,33 +18,64 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { patients, initials } from "@/data/patients";
-import { DOCTORS, TRIAGE_META, TRIAGE_ORDER, type Triage, type QueueEntry } from "@/data/queue";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+import { DOCTORS, TRIAGE_META, TRIAGE_ORDER, type Triage } from "@/data/queue";
+import { initials } from "@/data/patients";
+
+type PatientOption = {
+  id: string;
+  full_name: string;
+  national_id: string;
+  gender: Database["public"]["Enums"]["gender"];
+  dob: string;
+};
 
 type Props = {
   open: boolean;
   onOpenChange: (o: boolean) => void;
-  onCheckIn: (entry: QueueEntry) => void;
+  onCheckIn: (entry: Database["public"]["Tables"]["opd_queue"]["Insert"]) => void;
   nextQueueNo: string;
 };
 
 export function CheckInDialog({ open, onOpenChange, onCheckIn, nextQueueNo }: Props) {
-  const [query, setQuery] = useState("");
+    const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [triage, setTriage] = useState<Triage | "">("");
   const [doctor, setDoctor] = useState<string>("");
+  const [results, setResults] = useState<PatientOption[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const results = patients
-    .filter((p) => {
+  const selected = results.find((p) => p.id === selectedId) ?? null;
+  const selectedAge = selected ? Math.floor((Date.now() - new Date(selected.dob).getTime()) / 31557600000) : null;
+
+  useEffect(() => {
+    if (!query.trim()) {
+      setResults([]);
+      return;
+    }
+
+    const fetchPatients = async () => {
+      setLoading(true);
       const q = query.trim().toLowerCase();
-      if (!q) return true;
-      return p.name.toLowerCase().includes(q) || p.nationalId.includes(q);
-    })
-    .slice(0, 5);
+      const { data, error } = await supabase
+        .from("patients")
+        .select("id, full_name, national_id, gender, dob")
+        .or(`full_name.ilike.%${q}%,national_id.ilike.%${q}%`)
+        .limit(5);
+      if (error) {
+        console.error("Failed to search patients:", error.message);
+        setResults([]);
+      } else {
+        setResults(data ?? []);
+      }
+      setLoading(false);
+    };
 
-  const selected = patients.find((p) => p.id === selectedId) ?? null;
+    fetchPatients();
+  }, [query]);
 
   const reset = () => {
     setQuery("");
@@ -59,14 +90,14 @@ export function CheckInDialog({ open, onOpenChange, onCheckIn, nextQueueNo }: Pr
       return;
     }
     onCheckIn({
-      queueNo: nextQueueNo,
-      patientName: selected.name,
-      checkInTime: new Date().toISOString(),
+      queue_no: nextQueueNo,
+      patient_id: selected.id,
+      patient_name: selected.full_name,
       triage,
-      doctor,
+      assigned_to: doctor,
       status: "Waiting",
     });
-    toast.success(`${selected.name} checked in as ${nextQueueNo}`);
+    toast.success(`${selected.full_name} checked in as ${nextQueueNo}`);
     reset();
     onOpenChange(false);
   };
@@ -117,13 +148,13 @@ export function CheckInDialog({ open, onOpenChange, onCheckIn, nextQueueNo }: Pr
                   >
                     <Avatar className="h-8 w-8">
                       <AvatarFallback className="bg-primary/10 text-xs text-primary">
-                        {initials(p.name)}
+                        {initials(p.full_name)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{p.name}</p>
+                      <p className="truncate font-medium">{p.full_name}</p>
                       <p className="font-mono text-xs text-muted-foreground">
-                        {p.nationalId} · {p.age}y {p.gender}
+                        {p.national_id} · {Math.floor((Date.now() - new Date(p.dob).getTime()) / 31557600000)}y {p.gender}
                       </p>
                     </div>
                   </button>

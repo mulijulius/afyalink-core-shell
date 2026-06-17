@@ -10,6 +10,7 @@ import { CheckInDialog } from "@/components/queue/CheckInDialog";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { useAuth } from "@/lib/auth";
 
 type Triage = Database["public"]["Enums"]["triage_level"];
 type QueueStatus = Database["public"]["Enums"]["queue_status"];
@@ -17,6 +18,7 @@ type QueueStatus = Database["public"]["Enums"]["queue_status"];
 type QueueEntry = {
   id: string;
   queue_no: string;
+  patient_id: string | null;
   patient_name: string;
   check_in_time: string;
   triage: Triage;
@@ -79,6 +81,7 @@ function firstName(full: string) {
 }
 
 function OpdQueuePage() {
+  const { user } = useAuth();
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkInOpen, setCheckInOpen] = useState(false);
@@ -89,7 +92,7 @@ function OpdQueuePage() {
       const { data, error } = await supabase
         .from("opd_queue")
         .select("id, queue_no, patient_name, check_in_time, triage, assigned_to, status")
-        .order("check_in_time");
+        .order("check_in_time", { ascending: true });
       if (error) {
         console.error("Failed to load queue:", error.message);
         setQueue([]);
@@ -103,7 +106,7 @@ function OpdQueuePage() {
 
   const nextQueueNo = useMemo(() => {
     const max = queue
-      .map((q) => parseInt(q.queueNo.replace(/\D/g, ""), 10))
+      .map((q) => parseInt(q.queue_no.replace(/\D/g, ""), 10))
       .reduce((a, b) => Math.max(a, b), 0);
     return `A${String(max + 1).padStart(3, "0")}`;
   }, [queue]);
@@ -114,20 +117,38 @@ function OpdQueuePage() {
     return c;
   }, [queue]);
 
-  const handleCheckIn = (entry: QueueEntry) =>
-    setQueue((prev) => [...prev, entry]);
+  const handleCheckIn = async (entry: Omit<Database["public"]["Tables"]["opd_queue"]["Insert"], "id">) => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("opd_queue")
+      .insert({
+        ...entry,
+        checked_in_by: user?.id ?? null,
+      })
+      .select("id, queue_no, patient_id, patient_name, check_in_time, triage, assigned_to, status")
+      .single();
+
+    if (error) {
+      console.error("Failed to create queue entry:", error.message);
+      toast.error("Unable to check in patient");
+    } else if (data) {
+      setQueue((prev) => [...prev, data]);
+      toast.success(`${data.patient_name} checked in as ${data.queue_no}`);
+    }
+    setLoading(false);
+  };
 
   const handleCall = (q: QueueEntry) =>
-    toast.success(`Calling ${q.queueNo} · ${q.patientName}`);
+    toast.success(`Calling ${q.queue_no} · ${q.patient_name}`);
 
   const handleTransfer = (q: QueueEntry) =>
-    toast.info(`Transfer ${q.queueNo} (not yet wired)`);
+    toast.info(`Transfer ${q.queue_no} (not yet wired)`);
 
   // For the display screen: "now serving" is first In Consult, fallback to first Waiting
   const sorted = [...queue].sort(
     (a, b) =>
       TRIAGE_ORDER.indexOf(a.triage) - TRIAGE_ORDER.indexOf(b.triage) ||
-      new Date(a.checkInTime).getTime() - new Date(b.checkInTime).getTime(),
+      new Date(a.check_in_time).getTime() - new Date(b.check_in_time).getTime(),
   );
   const nowServing = sorted.find((q) => q.status === "In Consult") ?? sorted[0];
   const upNext = sorted.filter((q) => q !== nowServing).slice(0, 5);
@@ -190,11 +211,11 @@ function OpdQueuePage() {
                   {sorted.map((q) => {
                     const meta = TRIAGE_META[q.triage];
                     return (
-                      <TableRow key={q.queueNo}>
-                        <TableCell className="font-mono font-medium">{q.queueNo}</TableCell>
-                        <TableCell className="font-medium">{q.patientName}</TableCell>
+                      <TableRow key={q.queue_no}>
+                        <TableCell className="font-mono font-medium">{q.queue_no}</TableCell>
+                        <TableCell className="font-medium">{q.patient_name}</TableCell>
                         <TableCell className="text-muted-foreground">
-                          {new Date(q.checkInTime).toLocaleTimeString([], {
+                          {new Date(q.check_in_time).toLocaleTimeString([], {
                             hour: "2-digit",
                             minute: "2-digit",
                           })}
@@ -206,9 +227,9 @@ function OpdQueuePage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="font-mono text-muted-foreground">
-                          {formatWait(q.checkInTime)}
+                          {formatWait(q.check_in_time)}
                         </TableCell>
-                        <TableCell className="text-muted-foreground">{q.doctor}</TableCell>
+                        <TableCell className="text-muted-foreground">{q.assigned_to}</TableCell>
                         <TableCell>
                           <Badge
                             variant="outline"
@@ -287,13 +308,13 @@ function DisplayScreen({
         {nowServing ? (
           <>
             <p className="mt-4 font-mono text-7xl font-bold tracking-tight sm:text-9xl">
-              {nowServing.queueNo}
+              {nowServing.queue_no}
             </p>
             <p className="mt-4 text-3xl font-medium text-slate-100 sm:text-5xl">
-              {firstName(nowServing.patientName)}
+              {firstName(nowServing.patient_name)}
             </p>
             <p className="mt-2 text-base text-slate-400 sm:text-lg">
-              {nowServing.doctor}
+              {nowServing.assigned_to}
             </p>
           </>
         ) : (
@@ -308,10 +329,10 @@ function DisplayScreen({
         <div className="flex flex-wrap justify-center gap-3 sm:gap-4">
           {upNext.map((q) => (
             <div
-              key={q.queueNo}
+              key={q.queue_no}
               className="rounded-lg border border-slate-700 bg-slate-900 px-5 py-3 font-mono text-2xl font-semibold text-slate-100 sm:text-3xl"
             >
-              {q.queueNo}
+              {q.queue_no}
             </div>
           ))}
           {upNext.length === 0 && (

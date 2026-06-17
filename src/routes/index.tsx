@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState, useMemo } from "react";
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -18,6 +19,8 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -166,11 +169,27 @@ const tooltipStyle = {
 function AdminDashboard({ name, email, department, facility, phone, initials }: {
   name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
 }) {
+  const [lowStockItems, setLowStockItems] = useState<Array<{ name: string; qty: number; unit: string }>>([]);
+
+  useEffect(() => {
+    const fetchLowStock = async () => {
+      const { data } = await supabase
+        .from("pharmacy_drugs")
+        .select("name, stock, unit, reorder_level");
+      const low = (data ?? [])
+        .filter((d) => d.stock < d.reorder_level)
+        .map((d) => ({ name: d.name, qty: d.stock, unit: d.unit }))
+        .slice(0, 4);
+      setLowStockItems(low);
+    };
+    fetchLowStock();
+  }, []);
+
   const stats: Stat[] = [
     { label: "Patients Today",          value: "142",   icon: Users,         tone: "primary" },
     { label: "Currently Waiting (OPD)", value: "23",    icon: ListOrdered,   tone: "primary" },
     { label: "Beds Occupied",           value: "67/80", hint: "84% capacity", icon: BedDouble, tone: "accent" },
-    { label: "Drug Stock Alerts",       value: "4",     icon: AlertTriangle, tone: "warning" },
+    { label: "Drug Stock Alerts",       value: String(lowStockItems.length),     icon: AlertTriangle, tone: "warning" },
   ];
   return (
     <div className="space-y-6">
@@ -245,10 +264,10 @@ function AdminDashboard({ name, email, department, facility, phone, initials }: 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Low Stock Alerts</CardTitle>
-            <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{lowStock.length} items</Badge>
+            <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{lowStockItems.length} items</Badge>
           </CardHeader>
           <CardContent className="space-y-3">
-            {lowStock.map((d) => (
+            {lowStockItems.map((d) => (
               <div key={d.name} className="flex items-start justify-between gap-3 rounded-md border bg-card p-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{d.name}</p>
@@ -375,10 +394,26 @@ function NurseDashboard({ name, email, department, facility, phone, initials }: 
 function PharmacistDashboard({ name, email, department, facility, phone, initials }: {
   name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
 }) {
+  const [lowStockItems, setLowStockItems] = useState<Array<{ name: string; qty: number; unit: string }>>([]);
+
+  useEffect(() => {
+    const fetchLowStock = async () => {
+      const { data } = await supabase
+        .from("pharmacy_drugs")
+        .select("name, stock, unit, reorder_level");
+      const low = (data ?? [])
+        .filter((d) => d.stock < d.reorder_level)
+        .map((d) => ({ name: d.name, qty: d.stock, unit: d.unit }))
+        .slice(0, 4);
+      setLowStockItems(low);
+    };
+    fetchLowStock();
+  }, []);
+
   const stats: Stat[] = [
     { label: "Prescriptions to Dispense", value: String(pendingPrescriptions.length), icon: Pill,          tone: "primary" },
     { label: "Out of Stock",              value: "1",                                  icon: AlertTriangle, tone: "warning" },
-    { label: "Low Stock Items",           value: String(lowStock.length),              icon: AlertTriangle, tone: "accent" },
+    { label: "Low Stock Items",           value: String(lowStockItems.length),              icon: AlertTriangle, tone: "accent" },
     { label: "Dispensed Today",           value: "18",                                 icon: CheckCircle2,  tone: "primary" },
   ];
   return (
@@ -415,10 +450,10 @@ function PharmacistDashboard({ name, email, department, facility, phone, initial
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Low Stock Alerts</CardTitle>
-            <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{lowStock.length} items</Badge>
+            <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{lowStockItems.length} items</Badge>
           </CardHeader>
           <CardContent className="space-y-3">
-            {lowStock.map((d) => (
+            {lowStockItems.map((d) => (
               <div key={d.name} className="flex items-start justify-between gap-3 rounded-md border bg-card p-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{d.name}</p>

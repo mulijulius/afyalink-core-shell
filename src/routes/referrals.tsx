@@ -206,7 +206,40 @@ function SendReferralForm() {
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline">Save Draft</Button>
-            <Button className="bg-[#0057A8] hover:bg-[#0057A8]/90" onClick={() => setPreview(true)}>
+            <Button className="bg-[#0057A8] hover:bg-[#0057A8]/90" onClick={async () => {
+              if (!selected || !facility || !reason.trim()) {
+                toast.error("Fill all required fields");
+                return;
+              }
+              try {
+                const refNo = `REF-${Date.now().toString().slice(-5)}`;
+                const { error } = await supabase.from("referrals").insert({
+                  ref_no: refNo,
+                  patient_id: selected.id,
+                  patient_name: selected.full_name,
+                  national_id: selected.national_id,
+                  sent_to: facility,
+                  urgency,
+                  status: "Pending",
+                  reason,
+                  date_sent: new Date().toISOString().split('T')[0],
+                });
+                if (error) {
+                  console.error("Failed to create referral:", error);
+                  toast.error("Failed to create referral");
+                } else {
+                  toast.success(`Referral ${refNo} created`);
+                  setQuery("");
+                  setSelected(null);
+                  setFacility("");
+                  setReason("");
+                  setPreview(false);
+                }
+              } catch (err) {
+                console.error(err);
+                toast.error("Error creating referral");
+              }
+            }}>
               <FileText className="h-4 w-4 mr-1" /> Generate Referral Letter
             </Button>
           </div>
@@ -279,8 +312,27 @@ const STATUS_FILTERS: ("All" | ReferralStatus)[] = ["All", "Pending", "Received"
 function ReferralTracker() {
   const [filter, setFilter] = useState<"All" | ReferralStatus>("All");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [referrals, setReferrals] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const rows = sampleReferrals.filter((r) => filter === "All" || r.status === filter);
+  useEffect(() => {
+    const fetchReferrals = async () => {
+      const { data, error } = await supabase
+        .from("referrals")
+        .select("id, ref_no, patient_name, sent_to, date_sent, urgency, status, reason, outcome")
+        .order("date_sent", { ascending: false });
+      if (error) {
+        console.error("Failed to load referrals:", error);
+        setReferrals([]);
+      } else {
+        setReferrals(data ?? []);
+      }
+      setLoading(false);
+    };
+    fetchReferrals();
+  }, []);
+
+  const rows = referrals.filter((r) => filter === "All" || r.status === filter);
 
   return (
     <div className="space-y-4">
@@ -295,7 +347,7 @@ function ReferralTracker() {
           >
             {s}
             <span className="ml-1.5 text-xs opacity-70">
-              ({s === "All" ? sampleReferrals.length : sampleReferrals.filter(r => r.status === s).length})
+              ({s === "All" ? referrals.length : referrals.filter(r => r.status === s).length})
             </span>
           </Button>
         ))}
@@ -322,10 +374,10 @@ function ReferralTracker() {
                   <Fragment key={r.id}>
                     <TableRow className="cursor-pointer" onClick={() => setExpanded(open ? null : r.id)}>
                       <TableCell><ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} /></TableCell>
-                      <TableCell className="font-mono text-xs">{r.id}</TableCell>
-                      <TableCell className="font-medium">{r.patient}</TableCell>
-                      <TableCell className="text-sm">{r.sentTo}</TableCell>
-                      <TableCell>{r.dateSent}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.ref_no}</TableCell>
+                      <TableCell className="font-medium">{r.patient_name}</TableCell>
+                      <TableCell className="text-sm">{r.sent_to}</TableCell>
+                      <TableCell>{r.date_sent}</TableCell>
                       <TableCell><Badge variant="outline" className={urgencyClass(r.urgency)}>{r.urgency}</Badge></TableCell>
                       <TableCell><Badge variant="outline" className={statusClass(r.status)}>{r.status}</Badge></TableCell>
                     </TableRow>

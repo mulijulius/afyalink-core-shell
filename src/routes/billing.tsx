@@ -70,6 +70,7 @@ function NewBillTab() {
   const [stkState, setStkState] = useState<"idle" | "sending" | "confirmed">("idle");
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [savingTransaction, setSavingTransaction] = useState(false);
 
   const patient = patients.find((p) => p.id === selectedId);
   const visitId = patient ? `V-${patient.national_id.slice(-4)}` : "—";
@@ -118,24 +119,76 @@ function NewBillTab() {
   const removeRow = (id: string) =>
     setItems((prev) => prev.filter((i) => i.id !== id));
 
-  const sendStk = () => {
+  const sendStk = async () => {
     if (!/^\+?\d{9,13}$/.test(mpesaPhone.replace(/\s/g, ""))) {
       toast.error("Enter a valid phone number");
       return;
     }
-    setStkState("sending");
-    setTimeout(() => {
-      setStkState("confirmed");
-      toast.success(`M-Pesa payment of ${ksh(amountDue)} confirmed`);
-    }, 1800);
+    if (!selectedId) {
+      toast.error("Select a patient");
+      return;
+    }
+
+    setSavingTransaction(true);
+    try {
+      const receiptNo = `RCP-${Date.now().toString().slice(-5)}`;
+      const { error } = await supabase.from("billing_transactions").insert({
+        receipt_no: receiptNo,
+        patient_id: selectedId,
+        patient_name: patient?.full_name ?? "Unknown",
+        amount: amountDue,
+        method: "M-Pesa",
+        status: "Pending",
+        items: items,
+        transaction_date: today,
+      });
+      if (error) {
+        console.error("Failed to save transaction:", error);
+        toast.error("Failed to save transaction");
+        return;
+      }
+      setStkState("sending");
+      setTimeout(() => {
+        setStkState("confirmed");
+        toast.success(`M-Pesa payment of ${ksh(amountDue)} confirmed`);
+      }, 1800);
+    } finally {
+      setSavingTransaction(false);
+    }
   };
 
-  const submitClaim = () => {
+  const submitClaim = async () => {
     if (!nhifNo.trim()) {
       toast.error("Enter NHIF number");
       return;
     }
-    toast.success(`NHIF claim submitted for ${ksh(amountDue)}`);
+    if (!selectedId) {
+      toast.error("Select a patient");
+      return;
+    }
+
+    setStkState("sending");
+    try {
+      const claimNo = `CLM-${Date.now().toString().slice(-6)}`;
+      const { error } = await supabase.from("nhif_claims").insert({
+        claim_no: claimNo,
+        patient_id: selectedId,
+        patient_name: patient?.full_name ?? "Unknown",
+        visit_id: null,
+        amount: amountDue,
+        visit_date: today,
+        submitted_date: today,
+        status: "Submitted",
+      });
+      if (error) {
+        console.error("Failed to submit claim:", error);
+        toast.error("Failed to submit NHIF claim");
+      } else {
+        toast.success(`NHIF claim ${claimNo} submitted for ${ksh(amountDue)}`);
+      }
+    } finally {
+      setStkState("idle");
+    }
   };
 
   return (
@@ -355,6 +408,27 @@ function SummaryRow({
 /* -------------------- Payment History -------------------- */
 
 function HistoryTab() {
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchTransactions = async () => {
+      const { data, error } = await supabase
+        .from("billing_transactions")
+        .select("receipt_no, patient_name, transaction_date, amount, method, status")
+        .order("transaction_date", { ascending: false })
+        .limit(10);
+      if (error) {
+        console.error("Failed to load transactions:", error);
+        setTransactions([]);
+      } else {
+        setTransactions(data ?? []);
+      }
+      setLoading(false);
+    };
+    fetchTransactions();
+  }, []);
+
   const statusClass = (s: string) =>
     s === "Paid"
       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
@@ -378,10 +452,10 @@ function HistoryTab() {
           </TableHeader>
           <TableBody>
             {transactions.map((t) => (
-              <TableRow key={t.receipt}>
-                <TableCell className="font-mono">{t.receipt}</TableCell>
-                <TableCell className="font-medium">{t.patient}</TableCell>
-                <TableCell className="text-muted-foreground">{t.date}</TableCell>
+              <TableRow key={t.receipt_no}>
+                <TableCell className="font-mono">{t.receipt_no}</TableCell>
+                <TableCell className="font-medium">{t.patient_name}</TableCell>
+                <TableCell className="text-muted-foreground">{t.transaction_date}</TableCell>
                 <TableCell className="text-right font-mono">{t.amount.toLocaleString()}</TableCell>
                 <TableCell>{t.method}</TableCell>
                 <TableCell>
@@ -389,6 +463,13 @@ function HistoryTab() {
                 </TableCell>
               </TableRow>
             ))}
+            {transactions.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                  {loading ? "Loading..." : "No transactions found"}
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </div>
@@ -399,7 +480,26 @@ function HistoryTab() {
 /* -------------------- NHIF Claims -------------------- */
 
 function ClaimsTab() {
-  const [claims, setClaims] = useState<Claim[]>(initialClaims);
+  const [claims, setClaims] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchClaims = async () => {
+      const { data, error } = await supabase
+        .from("nhif_claims")
+        .select("claim_no, patient_name, visit_date, amount, submitted_date, status, rejection_reason")
+        .order("submitted_date", { ascending: false })
+        .limit(10);
+      if (error) {
+        console.error("Failed to load claims:", error);
+        setClaims([]);
+      } else {
+        setClaims(data ?? []);
+      }
+      setLoading(false);
+    };
+    fetchClaims();
+  }, []);
 
   const claimStatusClass = (s: string) =>
     s === "Approved"
@@ -408,26 +508,10 @@ function ClaimsTab() {
         ? "border-primary/30 bg-primary/10 text-primary"
         : "border-red-500/30 bg-red-500/10 text-red-700";
 
-  const newClaim = () => {
-    const id = `CLM-${3019 + claims.length - initialClaims.length}`;
-    setClaims((prev) => [
-      {
-        claimId: id,
-        patient: "New Patient",
-        visitDate: new Date().toISOString().slice(0, 10),
-        amount: 2000,
-        submitted: new Date().toISOString().slice(0, 10),
-        status: "Submitted",
-      },
-      ...prev,
-    ]);
-    toast.success(`Claim ${id} created`);
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button onClick={newClaim}>
+        <Button onClick={() => toast.info("Create new claims from the billing tab")}>
           <Plus className="mr-2 h-4 w-4" /> Generate New Claim
         </Button>
       </div>
@@ -447,14 +531,14 @@ function ClaimsTab() {
               </TableHeader>
               <TableBody>
                 {claims.map((c) => (
-                  <TableRow key={c.claimId}>
-                    <TableCell className="font-mono">{c.claimId}</TableCell>
-                    <TableCell className="font-medium">{c.patient}</TableCell>
-                    <TableCell className="text-muted-foreground">{c.visitDate}</TableCell>
+                  <TableRow key={c.claim_no}>
+                    <TableCell className="font-mono">{c.claim_no}</TableCell>
+                    <TableCell className="font-medium">{c.patient_name}</TableCell>
+                    <TableCell className="text-muted-foreground">{c.visit_date}</TableCell>
                     <TableCell className="text-right font-mono">{c.amount.toLocaleString()}</TableCell>
-                    <TableCell className="text-muted-foreground">{c.submitted}</TableCell>
+                    <TableCell className="text-muted-foreground">{c.submitted_date}</TableCell>
                     <TableCell>
-                      {c.status === "Rejected" && c.rejectionReason ? (
+                      {c.status === "Rejected" && c.rejection_reason ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Badge
@@ -466,7 +550,7 @@ function ClaimsTab() {
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs">
                             <p className="text-xs font-medium">Reason</p>
-                            <p className="text-xs">{c.rejectionReason}</p>
+                            <p className="text-xs">{c.rejection_reason}</p>
                           </TooltipContent>
                         </Tooltip>
                       ) : (
@@ -477,6 +561,13 @@ function ClaimsTab() {
                     </TableCell>
                   </TableRow>
                 ))}
+                {claims.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                      {loading ? "Loading..." : "No claims found"}
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TooltipProvider>
