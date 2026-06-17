@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Search, UserPlus, Eye, Pencil, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,8 +14,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { patients, initials } from "@/data/patients";
 import { RegisterPatientSheet } from "@/components/patients/RegisterPatientSheet";
+import { supabase } from "@/integrations/supabase/client";
+
+type PatientRow = {
+  id: string;
+  full_name: string;
+  national_id: string;
+  dob: string;
+  gender: "Male" | "Female";
+  phone: string | null;
+  county: string | null;
+  sub_county: string | null;
+  blood_group: string | null;
+  nok_name: string | null;
+  nok_phone: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type PatientWithMeta = PatientRow & {
+  age: number;
+  lastVisit: string;
+  name: string;
+};
 
 export const Route = createFileRoute("/patients")({
   head: () => ({
@@ -26,19 +48,67 @@ export const Route = createFileRoute("/patients")({
 
 const PAGE_SIZE = 5;
 
+function calculateAge(dob: string) {
+  const birth = new Date(dob);
+  if (Number.isNaN(birth.getTime())) return 0;
+  const diff = Date.now() - birth.getTime();
+  return Math.floor(diff / 31557600000);
+}
+
+function initials(name: string) {
+  return name
+    .split(" ")
+    .map((segment) => segment[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function normalizePatient(row: PatientRow): PatientWithMeta {
+  return {
+    ...row,
+    name: row.full_name,
+    age: calculateAge(row.dob),
+    lastVisit: row.updated_at.slice(0, 10),
+  };
+}
+
 function PatientsPage() {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [patients, setPatients] = useState<PatientWithMeta[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadPatients() {
+      const { data, error } = await supabase
+        .from("patients")
+        .select(
+          "id, full_name, national_id, dob, gender, phone, county, sub_county, blood_group, nok_name, nok_phone, created_at, updated_at",
+        )
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Failed to load patients:", error.message);
+        setPatients([]);
+      } else {
+        setPatients((data ?? []).map(normalizePatient));
+      }
+      setLoading(false);
+    }
+    loadPatients();
+  }, []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return patients;
     return patients.filter(
       (p) =>
-        p.name.toLowerCase().includes(q) || p.nationalId.includes(q),
+        p.name.toLowerCase().includes(q) ||
+        p.national_id.toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [query, patients]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const current = Math.min(page, totalPages);
@@ -50,7 +120,7 @@ function PatientsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Patients</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {patients.length} registered patients
+            {loading ? "Loading patients…" : `${patients.length} registered patients`}
           </p>
         </div>
         <Button onClick={() => setRegisterOpen(true)}>
@@ -99,7 +169,7 @@ function PatientsPage() {
                   </TableCell>
                   <TableCell className="font-medium">{p.name}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">
-                    {p.nationalId}
+                    {p.national_id}
                   </TableCell>
                   <TableCell>{p.age}</TableCell>
                   <TableCell>
@@ -128,7 +198,7 @@ function PatientsPage() {
               {slice.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
-                    No patients found
+                    {loading ? "Loading records…" : "No patients found"}
                   </TableCell>
                 </TableRow>
               )}

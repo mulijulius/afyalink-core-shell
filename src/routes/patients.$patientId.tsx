@@ -13,16 +13,207 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getPatient, initials, type Patient } from "@/data/patients";
+import { supabase } from "@/integrations/supabase/client";
+
+type PatientRow = {
+  id: string;
+  full_name: string;
+  national_id: string;
+  dob: string;
+  gender: "Male" | "Female";
+  phone: string | null;
+  county: string | null;
+  sub_county: string | null;
+  blood_group: string | null;
+  allergies: string[];
+  nok_name: string | null;
+  nok_phone: string | null;
+};
+
+type Patient = {
+  id: string;
+  name: string;
+  nationalId: string;
+  dob: string;
+  age: number;
+  gender: "Male" | "Female";
+  phone: string | null;
+  county: string | null;
+  subCounty: string | null;
+  bloodGroup: string | null;
+  allergies: string[];
+  nextOfKin: { name: string; phone: string };
+  visits: PatientProfileVisit[];
+  prescriptions: PatientProfilePrescription[];
+  labs: PatientProfileLab[];
+  billing: PatientProfileBilling[];
+};
+
+type PatientProfileVisit = {
+  date: string;
+  diagnosis: string | null;
+  clinician: string | null;
+  notes: string | null;
+};
+
+type PatientProfilePrescription = {
+  date: string;
+  drug: string;
+  dose: string;
+  duration: string;
+};
+
+type PatientProfileLab = {
+  date: string;
+  test: string;
+  result: string;
+  status: "Normal" | "Abnormal";
+};
+
+type PatientProfileBilling = {
+  date: string;
+  item: string;
+  amount: number;
+  status: "Paid" | "Pending" | "Failed";
+};
+
+type LoaderData = {
+  patient: Patient;
+  visits: PatientProfileVisit[];
+  prescriptions: PatientProfilePrescription[];
+  labs: PatientProfileLab[];
+  billing: PatientProfileBilling[];
+};
+
+function calculateAge(dob: string) {
+  const birth = new Date(dob);
+  if (Number.isNaN(birth.getTime())) return 0;
+  const diff = Date.now() - birth.getTime();
+  return Math.floor(diff / 31557600000);
+}
+
+function initials(name: string) {
+  return name
+    .split(" ")
+    .map((segment) => segment[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
 
 export const Route = createFileRoute("/patients/$patientId")({
   head: ({ params }) => ({
     meta: [{ title: `Patient ${params.patientId} · AfyaLink HMS` }],
   }),
-  loader: ({ params }) => {
-    const patient = getPatient(params.patientId);
-    if (!patient) throw notFound();
-    return { patient };
+  loader: async ({ params }) => {
+    const [{ data: patient, error: patientError }, visitsResult, prescriptionsResult, billingResult, ordersResult] =
+      await Promise.all([
+        supabase
+          .from("patients")
+          .select(
+            "id, full_name, national_id, dob, gender, phone, county, sub_county, blood_group, allergies, nok_name, nok_phone",
+          )
+          .eq("id", params.patientId)
+          .maybeSingle(),
+        supabase
+          .from("visits")
+          .select("visit_date, diagnosis, clinician_name, notes")
+          .eq("patient_id", params.patientId)
+          .order("visit_date", { ascending: false }),
+        supabase
+          .from("prescriptions")
+          .select("created_at, drug_name, dose, quantity")
+          .eq("patient_id", params.patientId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("billing_transactions")
+          .select("transaction_date, items, amount, status")
+          .eq("patient_id", params.patientId)
+          .order("transaction_date", { ascending: false }),
+        supabase
+          .from("lab_orders")
+          .select("id")
+          .eq("patient_id", params.patientId),
+      ]);
+
+    if (patientError || !patient) throw notFound();
+
+    const patientVisits = (visitsResult.data ?? []).map((visit) => ({
+      date: visit.visit_date,
+      diagnosis: visit.diagnosis,
+      clinician: visit.clinician_name,
+      notes: visit.notes,
+    }));
+
+    const patientPrescriptions = (prescriptionsResult.data ?? []).map((prescription) => ({
+      date: prescription.created_at.slice(0, 10),
+      drug: prescription.drug_name,
+      dose: prescription.dose,
+      duration: prescription.quantity,
+    }));
+
+    const billingItems = (billingResult.data ?? []).map((billing) => {
+      let item = "Billing transaction";
+      if (Array.isArray(billing.items) && billing.items.length > 0) {
+        item = billing.items
+          .map((entry) =>
+            typeof entry === "object" && entry !== null && "name" in entry ? String((entry as any).name) : String(entry),
+          )
+          .join(", ");
+      }
+
+      return {
+        date: billing.transaction_date,
+        item,
+        amount: Number(billing.amount),
+        status: billing.status,
+      };
+    });
+
+    const orderIds = ordersResult.data?.map((order) => order.id) ?? [];
+    const { data: labResults, error: labResultsError } =
+      orderIds.length > 0
+        ? await supabase
+            .from("lab_results")
+            .select("test_name, result, flag, created_at")
+            .in("order_id", orderIds)
+            .order("created_at", { ascending: false })
+        : { data: [], error: null };
+
+    if (labResultsError) {
+      console.error("Failed to load lab results:", labResultsError.message);
+    }
+
+    const patientLabs = (labResults ?? []).map((result) => ({
+      date: result.created_at.slice(0, 10),
+      test: result.test_name,
+      result: result.result,
+      status: result.flag === "Normal" ? "Normal" : "Abnormal",
+    }));
+
+    return {
+      patient: {
+        id: patient.id,
+        name: patient.full_name,
+        nationalId: patient.national_id,
+        dob: patient.dob,
+        age: calculateAge(patient.dob),
+        gender: patient.gender,
+        phone: patient.phone,
+        county: patient.county,
+        subCounty: patient.sub_county,
+        bloodGroup: patient.blood_group,
+        allergies: patient.allergies,
+        nextOfKin: {
+          name: patient.nok_name ?? "Unknown",
+          phone: patient.nok_phone ?? "Unknown",
+        },
+      },
+      visits: patientVisits,
+      prescriptions: patientPrescriptions,
+      labs: patientLabs,
+      billing: billingItems,
+    };
   },
   component: PatientProfile,
   notFoundComponent: () => (
@@ -36,7 +227,7 @@ export const Route = createFileRoute("/patients/$patientId")({
 });
 
 function PatientProfile() {
-  const { patient } = Route.useLoaderData() as { patient: Patient };
+  const { patient } = Route.useLoaderData() as LoaderData;
 
   return (
     <div className="space-y-6">

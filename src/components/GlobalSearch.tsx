@@ -1,12 +1,24 @@
-import { useMemo, useState } from "react";
-import { Search, User, Stethoscope, Pill, FileBarChart2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { Search, User, Pill, FileBarChart2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { patients } from "@/data/patients";
-import { initialDrugs } from "@/data/pharmacy";
+import { supabase } from "@/integrations/supabase/client";
+
+type PatientHit = {
+  id: string;
+  full_name: string;
+  national_id: string;
+};
+
+type DrugHit = {
+  id: string;
+  name: string;
+  stock: number;
+  unit: string;
+};
 
 type Result = {
-  kind: "Patients" | "Visits" | "Drugs" | "Reports";
+  kind: "Patients" | "Drugs" | "Reports";
   label: string;
   hint?: string;
   to: string;
@@ -21,7 +33,6 @@ const REPORTS: Result[] = [
 
 const ICONS = {
   Patients: User,
-  Visits: Stethoscope,
   Drugs: Pill,
   Reports: FileBarChart2,
 };
@@ -29,7 +40,21 @@ const ICONS = {
 export function GlobalSearch() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  const [patients, setPatients] = useState<PatientHit[]>([]);
+  const [drugs, setDrugs] = useState<DrugHit[]>([]);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    async function loadSearchData() {
+      const [{ data: patientData }, { data: drugData }] = await Promise.all([
+        supabase.from("patients").select("id, full_name, national_id").order("created_at", { ascending: false }),
+        supabase.from("pharmacy_drugs").select("id, name, stock, unit").order("name", { ascending: true }),
+      ]);
+      setPatients(patientData ?? []);
+      setDrugs(drugData ?? []);
+    }
+    loadSearchData();
+  }, []);
 
   const results = useMemo<Result[]>(() => {
     const term = q.trim().toLowerCase();
@@ -37,29 +62,17 @@ export function GlobalSearch() {
     const out: Result[] = [];
 
     for (const p of patients) {
-      if (
-        p.name.toLowerCase().includes(term) ||
-        p.nationalId.includes(term)
-      ) {
+      if (p.full_name.toLowerCase().includes(term) || p.national_id.includes(term)) {
         out.push({
           kind: "Patients",
-          label: p.name,
-          hint: `ID ${p.nationalId}`,
+          label: p.full_name,
+          hint: `ID ${p.national_id}`,
           to: `/patients/${p.id}`,
         });
       }
-      for (const v of p.visits) {
-        if (v.diagnosis.toLowerCase().includes(term)) {
-          out.push({
-            kind: "Visits",
-            label: `${v.diagnosis}`,
-            hint: `${p.name} · ${v.date}`,
-            to: `/patients/${p.id}`,
-          });
-        }
-      }
     }
-    for (const d of initialDrugs) {
+
+    for (const d of drugs) {
       if (d.name.toLowerCase().includes(term)) {
         out.push({
           kind: "Drugs",
@@ -69,11 +82,12 @@ export function GlobalSearch() {
         });
       }
     }
+
     for (const r of REPORTS) {
       if (r.label.toLowerCase().includes(term)) out.push(r);
     }
     return out.slice(0, 24);
-  }, [q]);
+  }, [q, patients, drugs]);
 
   const grouped = useMemo(() => {
     const g: Record<string, Result[]> = {};
