@@ -1,14 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  Search,
-  Plus,
-  Trash2,
-  Receipt,
-  Loader2,
-  Check,
-  FileText,
-  Send,
+  Search, Plus, Trash2, Receipt, Loader2, Check, FileText, Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,37 +10,21 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { patients } from "@/data/patients";
-import {
-  claims as initialClaims,
-  transactions,
-  defaultBillItems,
-  ksh,
-  type BillItem,
-  type Claim,
-  type PaymentMethod,
-} from "@/data/billing";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+
+type BillItem = { id: string; service: string; qty: number; unitCost: number };
+type PaymentMethod = "M-Pesa" | "NHIF" | "Cash" | "Insurance";
+type PatientOption = { id: string; full_name: string; national_id: string; phone: string | null };
+
+const ksh = (n: number) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(n);
 
 export const Route = createFileRoute("/billing")({
   head: () => ({ meta: [{ title: "Billing · AfyaLink HMS" }] }),
@@ -84,22 +61,45 @@ function BillingPage() {
 function NewBillTab() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [items, setItems] = useState<BillItem[]>(defaultBillItems);
+  const [items, setItems] = useState<BillItem[]>([
+    { id: "i-1", service: "Consultation", qty: 1, unitCost: 1500 },
+  ]);
   const [method, setMethod] = useState<PaymentMethod>("M-Pesa");
   const [mpesaPhone, setMpesaPhone] = useState("");
   const [nhifNo, setNhifNo] = useState("");
   const [stkState, setStkState] = useState<"idle" | "sending" | "confirmed">("idle");
+  const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [loading, setLoading] = useState(false);
 
   const patient = patients.find((p) => p.id === selectedId);
-  const visitId = patient ? `V-${patient.nationalId.slice(-4)}` : "—";
+  const visitId = patient ? `V-${patient.national_id.slice(-4)}` : "—";
   const today = new Date().toISOString().slice(0, 10);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return patients.slice(0, 5);
     return patients
-      .filter((p) => p.name.toLowerCase().includes(q) || p.nationalId.includes(q))
+      .filter((p) => p.full_name.toLowerCase().includes(q) || p.national_id.includes(q))
       .slice(0, 5);
+  }, [query, patients]);
+
+  useEffect(() => {
+    if (!query.trim()) {
+      setPatients([]);
+      return;
+    }
+    const searchPatients = async () => {
+      setLoading(true);
+      const q = query.toLowerCase();
+      const { data } = await supabase
+        .from("patients")
+        .select("id, full_name, national_id, phone")
+        .or(`full_name.ilike.%${q}%,national_id.ilike.%${q}%`)
+        .limit(5);
+      setPatients(data ?? []);
+      setLoading(false);
+    };
+    searchPatients();
   }, [query]);
 
   const subtotal = items.reduce((s, i) => s + i.qty * i.unitCost, 0);

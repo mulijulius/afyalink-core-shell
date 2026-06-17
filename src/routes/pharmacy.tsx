@@ -1,14 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  Search,
-  Plus,
-  Check,
-  AlertTriangle,
-  CalendarClock,
-  Pill,
-  ClipboardList,
-  Truck,
+  Search, Plus, Check, AlertTriangle, CalendarClock, Pill, ClipboardList, Truck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,42 +10,36 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import {
-  initialDrugs,
-  prescriptionVisits,
-  statusFor,
-  daysUntil,
-  DRUG_CATEGORIES,
-  type Drug,
-  type PrescriptionVisit,
-} from "@/data/pharmacy";
+import { supabase } from "@/integrations/supabase/client";
+
+const DRUG_CATEGORIES = [
+  "Antibiotic", "Antimalarial", "Antihypertensive", "Antidiabetic",
+  "Analgesic", "ORS / Fluids", "Antifungal", "Antihistamine",
+  "Vitamin / Supplement", "Other",
+];
+
+type Drug = { id: string; name: string; category: string; stock: number; unit: string; reorder_level: number; expiry_date: string | null };
 
 export const Route = createFileRoute("/pharmacy")({
   head: () => ({ meta: [{ title: "Pharmacy · AfyaLink HMS" }] }),
   component: PharmacyPage,
 });
+
+function statusFor(d: Drug): "In Stock" | "Low Stock" | "Out of Stock" {
+  if (d.stock === 0) return "Out of Stock";
+  if (d.stock < d.reorder_level) return "Low Stock";
+  return "In Stock";
+}
+
+function daysUntil(iso: string | null) {
+  if (!iso) return null;
+  return Math.floor((new Date(iso).getTime() - Date.now()) / 86400000);
+}
 
 function statusBadge(s: ReturnType<typeof statusFor>) {
   if (s === "In Stock") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700";
@@ -61,8 +48,26 @@ function statusBadge(s: ReturnType<typeof statusFor>) {
 }
 
 function PharmacyPage() {
-  const [drugs, setDrugs] = useState<Drug[]>(initialDrugs);
+  const [drugs, setDrugs] = useState<Drug[]>([]);
+  const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+
+  useEffect(() => {
+    const fetchDrugs = async () => {
+      const { data, error } = await supabase
+        .from("pharmacy_drugs")
+        .select("id, name, category, stock, unit, reorder_level, expiry_date")
+        .order("name");
+      if (error) {
+        console.error("Failed to load drugs:", error.message);
+        setDrugs([]);
+      } else {
+        setDrugs(data ?? []);
+      }
+      setLoading(false);
+    };
+    fetchDrugs();
+  }, []);
 
   return (
     <div className="space-y-6">

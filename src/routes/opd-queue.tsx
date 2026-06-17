@@ -5,23 +5,54 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  initialQueue,
-  TRIAGE_META,
-  TRIAGE_ORDER,
-  type QueueEntry,
-  type Triage,
-} from "@/data/queue";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CheckInDialog } from "@/components/queue/CheckInDialog";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+
+type Triage = Database["public"]["Enums"]["triage_level"];
+type QueueStatus = Database["public"]["Enums"]["queue_status"];
+
+type QueueEntry = {
+  id: string;
+  queue_no: string;
+  patient_name: string;
+  check_in_time: string;
+  triage: Triage;
+  assigned_to: string | null;
+  status: QueueStatus;
+};
+
+const TRIAGE_META: Record<Triage, { label: string; dot: string; badge: string }> = {
+  Red: {
+    label: "Immediate",
+    dot: "bg-red-500",
+    badge: "bg-red-500/10 text-red-700 border-red-500/30",
+  },
+  Orange: {
+    label: "Very Urgent",
+    dot: "bg-orange-500",
+    badge: "bg-orange-500/10 text-orange-700 border-orange-500/30",
+  },
+  Yellow: {
+    label: "Urgent",
+    dot: "bg-yellow-500",
+    badge: "bg-yellow-500/15 text-yellow-700 border-yellow-500/40",
+  },
+  Green: {
+    label: "Routine",
+    dot: "bg-emerald-500",
+    badge: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30",
+  },
+  Blue: {
+    label: "Deceased",
+    dot: "bg-blue-600",
+    badge: "bg-blue-600/10 text-blue-700 border-blue-600/30",
+  },
+};
+
+const TRIAGE_ORDER: Triage[] = ["Red", "Orange", "Yellow", "Green", "Blue"];
 
 export const Route = createFileRoute("/opd-queue")({
   head: () => ({ meta: [{ title: "OPD Queue · AfyaLink HMS" }] }),
@@ -48,9 +79,27 @@ function firstName(full: string) {
 }
 
 function OpdQueuePage() {
-  const [queue, setQueue] = useState<QueueEntry[]>(initialQueue);
+  const [queue, setQueue] = useState<QueueEntry[]>([]);
+  const [loading, setLoading] = useState(true);
   const [checkInOpen, setCheckInOpen] = useState(false);
   useTick(30_000); // refresh wait times every 30s
+
+  useEffect(() => {
+    const fetchQueue = async () => {
+      const { data, error } = await supabase
+        .from("opd_queue")
+        .select("id, queue_no, patient_name, check_in_time, triage, assigned_to, status")
+        .order("check_in_time");
+      if (error) {
+        console.error("Failed to load queue:", error.message);
+        setQueue([]);
+      } else {
+        setQueue(data ?? []);
+      }
+      setLoading(false);
+    };
+    fetchQueue();
+  }, []);
 
   const nextQueueNo = useMemo(() => {
     const max = queue

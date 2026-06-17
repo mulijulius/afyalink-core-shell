@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { AlertTriangle, Check, FlaskConical, Plus, Printer, Search } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -12,11 +12,18 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import {
-  LAB_TESTS, type LabOrder, type LabPriority, type LabResult,
-  initialOrders, initialResults, sampleTracks, SAMPLE_STAGES, type SampleStage,
-} from "@/data/laboratory";
-import { patients } from "@/data/patients";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+
+const LAB_TESTS = [
+  "Full Blood Count", "Malaria RDT", "Blood Glucose", "Urinalysis",
+  "HIV Rapid Test", "Widal Test", "Lipid Profile", "Liver Function Tests",
+  "Chest X-Ray", "Sputum AFB",
+] as const;
+
+type LabPriority = "Routine" | "Urgent" | "STAT";
+type LabOrder = { id: string; order_no: string; patient_name: string; national_id: string | null; tests: string[]; priority: LabPriority; status: "Pending" | "Collected" | "Processing" | "Completed" };
+type PatientOption = { id: string; full_name: string; national_id: string; gender: Database["public"]["Enums"]["gender"]; dob: string };
 
 export const Route = createFileRoute("/laboratory")({
   component: LaboratoryPage,
@@ -41,14 +48,35 @@ const flagClass = (f: LabResult["flag"]) =>
 function NewOrderDialog({ onCreate }: { onCreate: (o: LabOrder) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [selectedPatient, setSelectedPatient] = useState<typeof patients[number] | null>(null);
+  const [selectedPatient, setSelectedPatient] = useState<PatientOption | null>(null);
   const [tests, setTests] = useState<string[]>([]);
   const [priority, setPriority] = useState<LabPriority>("Routine");
+  const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [loading, setLoading] = useState(false);
 
   const matches = useMemo(() => {
     if (!query) return [];
     const q = query.toLowerCase();
-    return patients.filter(p => p.name.toLowerCase().includes(q) || p.nationalId.includes(q)).slice(0, 5);
+    return patients.filter(p => p.full_name.toLowerCase().includes(q) || p.national_id.includes(q)).slice(0, 5);
+  }, [query, patients]);
+
+  useEffect(() => {
+    if (!query.trim()) {
+      setPatients([]);
+      return;
+    }
+    const searchPatients = async () => {
+      setLoading(true);
+      const q = query.toLowerCase();
+      const { data } = await supabase
+        .from("patients")
+        .select("id, full_name, national_id, gender, dob")
+        .or(`full_name.ilike.%${q}%,national_id.ilike.%${q}%`)
+        .limit(5);
+      setPatients(data ?? []);
+      setLoading(false);
+    };
+    searchPatients();
   }, [query]);
 
   const reset = () => { setQuery(""); setSelectedPatient(null); setTests([]); setPriority("Routine"); };
@@ -58,19 +86,17 @@ function NewOrderDialog({ onCreate }: { onCreate: (o: LabOrder) => void }) {
       toast.error("Select a patient and at least one test");
       return;
     }
-    const id = `LAB-${2047 + Math.floor(Math.random() * 900)}`;
-    const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const orderNo = `LAB-${2047 + Math.floor(Math.random() * 900)}`;
     onCreate({
-      id,
-      patientName: selectedPatient.name,
-      nationalId: selectedPatient.nationalId,
+      id: orderNo,
+      order_no: orderNo,
+      patient_name: selectedPatient.full_name,
+      national_id: selectedPatient.national_id,
       tests,
-      orderedBy: "Dr. Mwangi",
-      time,
       priority,
       status: "Pending",
     });
-    toast.success(`Order ${id} created`);
+    toast.success(`Order ${orderNo} created`);
     reset();
     setOpen(false);
   };
@@ -88,8 +114,8 @@ function NewOrderDialog({ onCreate }: { onCreate: (o: LabOrder) => void }) {
           {selectedPatient ? (
             <div className="flex items-center justify-between rounded-md border p-3 bg-muted/40">
               <div>
-                <p className="font-medium">{selectedPatient.name}</p>
-                <p className="text-xs text-muted-foreground">ID: {selectedPatient.nationalId} • {selectedPatient.gender}, {selectedPatient.age}y</p>
+                <p className="font-medium">{selectedPatient.full_name}</p>
+                <p className="text-xs text-muted-foreground">ID: {selectedPatient.national_id} • {selectedPatient.gender}</p>
               </div>
               <Button variant="ghost" size="sm" onClick={() => setSelectedPatient(null)}>Change</Button>
             </div>

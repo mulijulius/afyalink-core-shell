@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, useEffect } from "react";
 import { ChevronDown, FileText, Printer, Search, Send, Share2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -12,9 +12,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { RECEIVING_FACILITIES, sampleReferrals, type ReferralStatus, type Urgency } from "@/data/referrals";
-import { patients } from "@/data/patients";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+
+const RECEIVING_FACILITIES = [
+  "Kenyatta National Hospital (KNH)",
+  "Moi Teaching & Referral Hospital",
+  "Aga Khan University Hospital",
+  "MP Shah Hospital",
+  "Nairobi Hospital",
+] as const;
+
+type Urgency = "Routine" | "Urgent" | "Emergency";
+type ReferralStatus = "Pending" | "Received" | "Completed" | "No Feedback";
+type PatientOption = { id: string; full_name: string; national_id: string; gender: Database["public"]["Enums"]["gender"]; dob: string };
 
 export const Route = createFileRoute("/referrals")({
   component: ReferralsPage,
@@ -35,7 +47,7 @@ const statusClass = (s: ReferralStatus) =>
 
 function SendReferralForm() {
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<typeof patients[number] | null>(null);
+  const [selected, setSelected] = useState<PatientOption | null>(null);
   const [facility, setFacility] = useState<string>("");
   const [urgency, setUrgency] = useState<Urgency>("Routine");
   const [reason, setReason] = useState("");
@@ -46,17 +58,39 @@ function SendReferralForm() {
   const [contact, setContact] = useState("");
   const [preview, setPreview] = useState(false);
 
+  const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [loading, setLoading] = useState(false);
+
   const matches = useMemo(() => {
     if (!query) return [];
     const q = query.toLowerCase();
-    return patients.filter(p => p.name.toLowerCase().includes(q) || p.nationalId.includes(q)).slice(0, 5);
+    return patients.filter(p => p.full_name.toLowerCase().includes(q) || p.national_id.includes(q)).slice(0, 5);
+  }, [query, patients]);
+
+  useEffect(() => {
+    if (!query.trim()) {
+      setPatients([]);
+      return;
+    }
+    const searchPatients = async () => {
+      setLoading(true);
+      const q = query.toLowerCase();
+      const { data } = await supabase
+        .from("patients")
+        .select("id, full_name, national_id, gender, dob")
+        .or(`full_name.ilike.%${q}%,national_id.ilike.%${q}%`)
+        .limit(5);
+      setPatients(data ?? []);
+      setLoading(false);
+    };
+    searchPatients();
   }, [query]);
 
-  const choosePatient = (p: typeof patients[number]) => {
+  const choosePatient = (p: PatientOption) => {
     setSelected(p);
     setQuery("");
-    const last = p.visits[0];
-    if (last) setSummary(`Last visit ${last.date}: ${last.diagnosis}. Attended by ${last.clinician}. Patient is a ${p.age}y ${p.gender.toLowerCase()} from ${p.county}, blood group ${p.bloodGroup}${p.allergies.length ? `, known allergies: ${p.allergies.join(", ")}` : ""}.`);
+    const age = Math.floor((Date.now() - new Date(p.dob).getTime()) / 31557600000);
+    setSummary(`Selected patient: ${p.full_name}, ${age}y ${p.gender}. National ID: ${p.national_id}. (Summary will update with latest visit data from Supabase).`);
   };
 
   return (
@@ -85,8 +119,8 @@ function SendReferralForm() {
             {selected ? (
               <div className="flex items-center justify-between rounded-md border p-3 bg-muted/40">
                 <div>
-                  <p className="font-medium">{selected.name}</p>
-                  <p className="text-xs text-muted-foreground">ID: {selected.nationalId} • {selected.gender}, {selected.age}y • {selected.phone}</p>
+                  <p className="font-medium">{selected.full_name}</p>
+                  <p className="text-xs text-muted-foreground">ID: {selected.national_id} • {selected.gender}</p>
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => { setSelected(null); setSummary(""); }}>Change</Button>
               </div>
