@@ -16,6 +16,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
+import { EmptyState } from "@/components/EmptyState";
+import { TableSkeleton } from "@/components/TableSkeleton";
 
 const DRUG_CATEGORIES = [
   "Antibiotic", "Antimalarial", "Antihypertensive", "Antidiabetic",
@@ -23,7 +26,61 @@ const DRUG_CATEGORIES = [
   "Vitamin / Supplement", "Other",
 ];
 
-type Drug = { id: string; name: string; category: string; stock: number; unit: string; reorder_level: number; expiry_date: string | null };
+const DRUG_COLUMNS = "id, name, category, stock, unit, reorder_level, expiry_date, supplier";
+
+type Drug = {
+  id: string;
+  name: string;
+  category: string;
+  stock: number;
+  unit: string;
+  reorder_level: number;
+  expiry_date: string | null;
+  supplier: string | null;
+};
+
+type PrescriptionRow = {
+  id: string;
+  visit_id: string | null;
+  patient_id: string | null;
+  patient_name: string;
+  drug_name: string;
+  dose: string;
+  quantity: string;
+  prescribed_by_name: string | null;
+  dispensed: boolean;
+  created_at: string;
+};
+
+type RxGroup = {
+  key: string;
+  visitId: string | null;
+  patient: string;
+  date: string;
+  clinician: string;
+  items: PrescriptionRow[];
+};
+
+function groupPrescriptions(rows: PrescriptionRow[]): RxGroup[] {
+  const groups = new Map<string, RxGroup>();
+  for (const row of rows) {
+    const key = row.visit_id ?? `rx-${row.id}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.items.push(row);
+    } else {
+      groups.set(key, {
+        key,
+        visitId: row.visit_id,
+        patient: row.patient_name,
+        date: row.created_at.slice(0, 10),
+        clinician: row.prescribed_by_name || "—",
+        items: [row],
+      });
+    }
+  }
+  return Array.from(groups.values());
+}
 
 export const Route = createFileRoute("/pharmacy")({
   head: () => ({ meta: [{ title: "Pharmacy · AfyaLink HMS" }] }),
@@ -56,7 +113,7 @@ function PharmacyPage() {
     const fetchDrugs = async () => {
       const { data, error } = await supabase
         .from("pharmacy_drugs")
-        .select("id, name, category, stock, unit, reorder_level, expiry_date")
+        .select(DRUG_COLUMNS)
         .order("name");
       if (error) {
         console.error("Failed to load drugs:", error.message);
@@ -160,9 +217,9 @@ function InventoryTab({ drugs, onOpenAdd }: { drugs: Drug[]; onOpenAdd: () => vo
                     <TableCell className="text-muted-foreground">{d.category}</TableCell>
                     <TableCell className="font-mono">{d.stock}</TableCell>
                     <TableCell className="text-muted-foreground">{d.unit}</TableCell>
-                    <TableCell className="font-mono text-muted-foreground">{d.reorderLevel}</TableCell>
-                    <TableCell className="text-muted-foreground">{d.expiry}</TableCell>
-                    <TableCell className="text-muted-foreground">{d.supplier}</TableCell>
+                    <TableCell className="font-mono text-muted-foreground">{d.reorder_level}</TableCell>
+                    <TableCell className="text-muted-foreground">{d.expiry_date ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{d.supplier ?? "—"}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className={statusBadge(s)}>
                         {s}
@@ -189,36 +246,78 @@ function InventoryTab({ drugs, onOpenAdd }: { drugs: Drug[]; onOpenAdd: () => vo
 /* -------------------- Dispense -------------------- */
 
 function DispenseTab() {
+  const { user } = useAuth();
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<PrescriptionVisit | null>(null);
-  const [dispensed, setDispensed] = useState<Record<string, boolean>>({});
+  const [rows, setRows] = useState<PrescriptionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchPrescriptions = async () => {
+      const { data, error } = await supabase
+        .from("prescriptions")
+        .select("id, visit_id, patient_id, patient_name, drug_name, dose, quantity, prescribed_by_name, dispensed, created_at")
+        .order("created_at", { ascending: false });
+      if (error) {
+        console.error("Failed to load prescriptions:", error.message);
+        setRows([]);
+      } else {
+        setRows(data ?? []);
+      }
+      setLoading(false);
+    };
+    fetchPrescriptions();
+  }, []);
+
+  const groups = useMemo(() => groupPrescriptions(rows), [rows]);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return prescriptionVisits;
-    return prescriptionVisits.filter(
-      (v) =>
-        v.patient.toLowerCase().includes(q) ||
-        v.nationalId.includes(q) ||
-        v.visitId.toLowerCase().includes(q),
+    if (!q) return groups;
+    return groups.filter(
+      (g) =>
+        g.patient.toLowerCase().includes(q) ||
+        (g.visitId ?? "").toLowerCase().includes(q) ||
+        g.items.some((rx) => rx.drug_name.toLowerCase().includes(q)),
     );
-  }, [query]);
+  }, [query, groups]);
 
-  const handleDispense = (rxId: string, drug: string) => {
-    setDispensed((prev) => ({ ...prev, [rxId]: true }));
+  const selected = groups.find((g) => g.key === selectedKey) ?? null;
+
+  const handleDispense = async (rxId: string, drug: string) => {
+    const { error } = await supabase
+      .from("prescriptions")
+      .update({
+        dispensed: true,
+        dispensed_by: user?.id ?? null,
+        dispensed_at: new Date().toISOString(),
+      })
+      .eq("id", rxId);
+
+    if (error) {
+      console.error("Failed to record dispense:", error.message);
+      toast.error("Unable to record dispense");
+      return;
+    }
+
+    setRows((prev) => prev.map((rx) => (rx.id === rxId ? { ...rx, dispensed: true } : rx)));
     toast.success(`${drug} dispensed`);
   };
+
+  if (loading) {
+    return <TableSkeleton cols={4} rows={4} />;
+  }
 
   return (
     <div className="space-y-4">
       <div className="relative max-w-md">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          placeholder="Search patient name, National ID, or visit ID"
+          placeholder="Search patient name, drug, or visit"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
-            setSelected(null);
+            setSelectedKey(null);
           }}
           maxLength={60}
           className="pl-9"
@@ -228,26 +327,32 @@ function DispenseTab() {
       {!selected ? (
         <Card className="p-0">
           <div className="divide-y">
-            {matches.map((v) => (
+            {matches.map((g) => (
               <button
-                key={v.visitId}
-                onClick={() => setSelected(v)}
+                key={g.key}
+                onClick={() => setSelectedKey(g.key)}
                 className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-muted/60"
               >
                 <div>
-                  <p className="font-medium">{v.patient}</p>
+                  <p className="font-medium">{g.patient}</p>
                   <p className="text-xs text-muted-foreground">
-                    <span className="font-mono">{v.nationalId}</span> · Visit{" "}
-                    <span className="font-mono">{v.visitId}</span> · {v.date} · {v.clinician}
+                    {g.visitId && (
+                      <>
+                        Visit <span className="font-mono">{g.visitId.slice(0, 8)}</span> ·{" "}
+                      </>
+                    )}
+                    {g.date} · {g.clinician}
                   </p>
                 </div>
-                <Badge variant="outline">{v.prescriptions.length} Rx</Badge>
+                <Badge variant="outline">{g.items.length} Rx</Badge>
               </button>
             ))}
             {matches.length === 0 && (
-              <p className="py-10 text-center text-sm text-muted-foreground">
-                No matching visits
-              </p>
+              <EmptyState
+                icon={<ClipboardList className="h-6 w-6" />}
+                title="No matching prescriptions"
+                className="border-0"
+              />
             )}
           </div>
         </Card>
@@ -258,10 +363,15 @@ function DispenseTab() {
               <div>
                 <p className="font-semibold">{selected.patient}</p>
                 <p className="text-xs text-muted-foreground">
-                  Visit <span className="font-mono">{selected.visitId}</span> · {selected.date} · {selected.clinician}
+                  {selected.visitId && (
+                    <>
+                      Visit <span className="font-mono">{selected.visitId.slice(0, 8)}</span> ·{" "}
+                    </>
+                  )}
+                  {selected.date} · {selected.clinician}
                 </p>
               </div>
-              <Button variant="outline" size="sm" onClick={() => setSelected(null)}>
+              <Button variant="outline" size="sm" onClick={() => setSelectedKey(null)}>
                 Back
               </Button>
             </div>
@@ -277,11 +387,11 @@ function DispenseTab() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {selected.prescriptions.map((rx) => {
-                    const done = dispensed[rx.id];
+                  {selected.items.map((rx) => {
+                    const done = rx.dispensed;
                     return (
                       <TableRow key={rx.id}>
-                        <TableCell className="font-medium">{rx.drug}</TableCell>
+                        <TableCell className="font-medium">{rx.drug_name}</TableCell>
                         <TableCell>{rx.dose}</TableCell>
                         <TableCell className="text-muted-foreground">{rx.quantity}</TableCell>
                         <TableCell className="text-right">
@@ -293,7 +403,7 @@ function DispenseTab() {
                               <Check className="mr-1 h-3 w-3" /> Dispensed
                             </Badge>
                           ) : (
-                            <Button size="sm" onClick={() => handleDispense(rx.id, rx.drug)}>
+                            <Button size="sm" onClick={() => handleDispense(rx.id, rx.drug_name)}>
                               Dispense
                             </Button>
                           )}
@@ -314,10 +424,10 @@ function DispenseTab() {
 /* -------------------- Alerts -------------------- */
 
 function AlertsTab({ drugs }: { drugs: Drug[] }) {
-  const lowStock = drugs.filter((d) => d.stock < d.reorderLevel);
+  const lowStock = drugs.filter((d) => d.stock < d.reorder_level);
   const expiringSoon = drugs.filter((d) => {
-    const days = daysUntil(d.expiry);
-    return days >= 0 && days <= 90;
+    const days = daysUntil(d.expiry_date);
+    return days !== null && days >= 0 && days <= 90;
   });
 
   const handleRestock = (name: string) => toast.success(`Restock request sent for ${name}`);
@@ -342,7 +452,7 @@ function AlertsTab({ drugs }: { drugs: Drug[] }) {
                   <p className="truncate font-medium">{d.name}</p>
                   <p className="text-xs text-muted-foreground">
                     Stock <span className="font-mono">{d.stock}</span> {d.unit} · Reorder at{" "}
-                    <span className="font-mono">{d.reorderLevel}</span>
+                    <span className="font-mono">{d.reorder_level}</span>
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -376,7 +486,7 @@ function AlertsTab({ drugs }: { drugs: Drug[] }) {
                 <div className="min-w-0">
                   <p className="truncate font-medium">{d.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    Expires {d.expiry} · {daysUntil(d.expiry)} days left
+                    Expires {d.expiry_date} · {daysUntil(d.expiry_date)} days left
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -417,25 +527,43 @@ function AddDrugDialog({
   onOpenChange: (o: boolean) => void;
   onAdd: (d: Drug) => void;
 }) {
+  const { user } = useAuth();
   const [form, setForm] = useState(emptyDrug);
+  const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof emptyDrug, v: string) =>
     setForm((p) => ({ ...p, [k]: v }));
 
-  const submit = () => {
+  const submit = async () => {
     if (!form.name.trim() || !form.category || !form.expiry) {
       toast.error("Name, category and expiry are required");
       return;
     }
-    onAdd({
-      id: `d-${Date.now()}`,
-      name: form.name.trim(),
-      category: form.category,
-      stock: Number(form.stock) || 0,
-      unit: form.unit.trim() || "units",
-      reorderLevel: Number(form.reorderLevel) || 0,
-      expiry: form.expiry,
-      supplier: form.supplier.trim() || "—",
-    });
+
+    setBusy(true);
+    const { data, error } = await supabase
+      .from("pharmacy_drugs")
+      .insert({
+        name: form.name.trim(),
+        category: form.category,
+        stock: Number(form.stock) || 0,
+        unit: form.unit.trim() || "tabs",
+        reorder_level: Number(form.reorderLevel) || 0,
+        expiry_date: form.expiry,
+        supplier: form.supplier.trim() || null,
+        updated_by: user?.id ?? null,
+      })
+      .select(DRUG_COLUMNS)
+      .single();
+
+    setBusy(false);
+
+    if (error) {
+      console.error("Failed to add drug:", error.message);
+      toast.error(error.message || "Unable to add drug");
+      return;
+    }
+
+    onAdd(data);
     toast.success("Drug added to inventory");
     setForm(emptyDrug);
     onOpenChange(false);
@@ -478,8 +606,8 @@ function AddDrugDialog({
           </Field>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit}>Add Drug</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
+          <Button onClick={submit} disabled={busy}>{busy ? "Saving…" : "Add Drug"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
