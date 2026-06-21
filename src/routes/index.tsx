@@ -1,633 +1,581 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo } from "react";
-import {
-  LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-} from "recharts";
-import {
-  Users, ListOrdered, BedDouble, AlertTriangle,
-  FlaskConical, Pill, Receipt, Share2, Clock,
-  CheckCircle2, Building2, Phone, Mail, Shield,
-  type LucideIcon,
-} from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useMemo, useState, useEffect, useCallback } from "react";
+import { AlertTriangle, Check, FlaskConical, Plus, Printer, Search } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table, TableBody, TableCell, TableHead,
-  TableHeader, TableRow,
-} from "@/components/ui/table";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Separator } from "@/components/ui/separator";
-import { useAuth } from "@/lib/auth";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { useAuth } from "@/lib/auth";
+import { TableSkeleton } from "@/components/TableSkeleton";
+import { EmptyState } from "@/components/EmptyState";
 
-export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Dashboard · AfyaLink HMS" },
-      { name: "description", content: "Clinical dashboard for Kapsabet Referral Hospital." },
-    ],
-  }),
-  component: Dashboard,
+const LAB_TESTS = [
+  "Full Blood Count", "Malaria RDT", "Blood Glucose", "Urinalysis",
+  "HIV Rapid Test", "Widal Test", "Lipid Profile", "Liver Function Tests",
+  "Chest X-Ray", "Sputum AFB",
+] as const;
+
+const SAMPLE_STAGES = ["Collected", "Received by Lab", "Processing", "Results Ready"] as const;
+type SampleStage = (typeof SAMPLE_STAGES)[number];
+
+type LabPriority = Database["public"]["Enums"]["lab_priority"];
+type LabOrderStatus = Database["public"]["Enums"]["lab_order_status"];
+type ResultFlag = Database["public"]["Enums"]["result_flag"];
+type PatientOption = { id: string; full_name: string; national_id: string; gender: Database["public"]["Enums"]["gender"]; dob: string };
+
+type LabOrderRow = {
+  id: string;
+  order_no: string;
+  patient_id: string | null;
+  patient_name: string;
+  national_id: string | null;
+  tests: string[];
+  ordered_by_name: string | null;
+  priority: LabPriority;
+  status: LabOrderStatus;
+  created_at: string;
+};
+
+type LabResultRow = {
+  id: string;
+  order_id: string;
+  test_name: string;
+  result: string;
+  reference_range: string | null;
+  flag: ResultFlag;
+  is_critical: boolean;
+  verified_by_name: string | null;
+  sample_id: string | null;
+  created_at: string;
+  // joined from lab_orders for display
+  patient_name?: string;
+};
+
+export const Route = createFileRoute("/laboratory")({
+  component: LaboratoryPage,
 });
 
-// ── Shared static mock data (replace with Supabase queries in next phase) ──
-const weekVisits = [
-  { day: "Mon", visits: 118 }, { day: "Tue", visits: 134 },
-  { day: "Wed", visits: 156 }, { day: "Thu", visits: 142 },
-  { day: "Fri", visits: 168 }, { day: "Sat", visits: 96 },
-  { day: "Sun", visits: 72 },
-];
-const diagnoses = [
-  { name: "Malaria", cases: 248 }, { name: "URI", cases: 187 },
-  { name: "Hypertension", cases: 142 }, { name: "Diabetes", cases: 98 },
-  { name: "Typhoid", cases: 76 },
-];
-const recentPatients = [
-  { name: "Wanjiku Kamau",  id: "29384756", time: "09:42", dept: "OPD",        status: "In Consult" },
-  { name: "Brian Otieno",   id: "31827465", time: "09:31", dept: "Pharmacy",   status: "Dispensing" },
-  { name: "Aisha Mohamed",  id: "27645839", time: "09:18", dept: "Laboratory", status: "Awaiting Results" },
-  { name: "Joseph Kiprono", id: "33928174", time: "09:05", dept: "OPD",        status: "Waiting" },
-  { name: "Faith Achieng",  id: "30192847", time: "08:52", dept: "Maternity",  status: "Admitted" },
-];
-const lowStock = [
-  { name: "Artemether-Lumefantrine 20/120mg", qty: 24, unit: "packs" },
-  { name: "Amoxicillin 500mg",                qty: 18, unit: "strips" },
-  { name: "Paracetamol 500mg",                qty: 42, unit: "tabs" },
-  { name: "Metformin 500mg",                  qty: 15, unit: "strips" },
-];
-const myQueue = [
-  { queueNo: "A012", patient: "Wanjiku Kamau",  triage: "Yellow", wait: "38m", status: "In Consult" },
-  { queueNo: "A015", patient: "Joseph Kiprono", triage: "Orange", wait: "22m", status: "Waiting" },
-  { queueNo: "A018", patient: "Mercy Wairimu",  triage: "Green",  wait: "9m",  status: "Waiting" },
-];
-const criticalResults = [
-  { patient: "Joseph Kiprono", test: "Blood Glucose (Fasting)", result: "22.4 mmol/L", flag: "High" },
-  { patient: "Wanjiku Kamau",  test: "Hemoglobin",              result: "9.2 g/dL",    flag: "Low" },
-];
-const pendingPrescriptions = [
-  { patient: "Wanjiku Kamau",  drug: "Amlodipine 5mg",                   dose: "5mg OD",   qty: "30 tabs" },
-  { patient: "Brian Otieno",   drug: "Artemether-Lumefantrine 20/120mg", dose: "4 tabs BD", qty: "1 pack" },
-  { patient: "Joseph Kiprono", drug: "Metformin 500mg",                  dose: "500mg BD", qty: "60 tabs" },
-];
-const pendingLabOrders = [
-  { id: "LAB-2041", patient: "Wanjiku Kamau", tests: ["Full Blood Count","Lipid Profile"], priority: "Routine", status: "Processing" },
-  { id: "LAB-2044", patient: "Aisha Mohamed", tests: ["Urinalysis","HIV Rapid Test"],     priority: "Routine", status: "Collected" },
-  { id: "LAB-2045", patient: "David Mutua",   tests: ["Widal Test"],                       priority: "Urgent",  status: "Pending" },
-];
-const revenue = [
-  { method: "M-Pesa", amount: 42500 }, { method: "NHIF", amount: 31200 },
-  { method: "Cash",   amount: 14800 }, { method: "Insurance", amount: 9600 },
-];
-const pendingBilling = [
-  { receipt: "RCP-10238", patient: "Joseph Kiprono", amount: 3400, method: "NHIF" },
-  { receipt: "RCP-10234", patient: "David Mutua",    amount: 2100, method: "M-Pesa" },
-];
+const priorityClass = (p: LabPriority) =>
+  p === "STAT" ? "bg-red-100 text-red-700 border-red-200"
+  : p === "Urgent" ? "bg-amber-100 text-amber-700 border-amber-200"
+  : "bg-slate-100 text-slate-700 border-slate-200";
 
-const STATUS_CLASS: Record<string, string> = {
-  "In Consult":       "bg-primary/10 text-primary border-primary/20",
-  Dispensing:         "bg-accent/10 text-accent border-accent/30",
-  "Awaiting Results": "bg-amber-500/10 text-amber-700 border-amber-500/30",
-  Waiting:            "bg-muted text-muted-foreground border-border",
-  Admitted:           "bg-accent/10 text-accent border-accent/30",
-};
+const statusClass = (s: LabOrderStatus) =>
+  s === "Completed" ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+  : s === "Processing" ? "bg-sky-100 text-sky-700 border-sky-200"
+  : s === "Collected" ? "bg-indigo-100 text-indigo-700 border-indigo-200"
+  : "bg-slate-100 text-slate-700 border-slate-200";
 
-// ── Shared components ───────────────────────────────────────────
+const flagClass = (f: ResultFlag) =>
+  f === "High" ? "bg-red-100 text-red-700 border-red-200"
+  : f === "Low" ? "bg-amber-100 text-amber-700 border-amber-200"
+  : "bg-emerald-100 text-emerald-700 border-emerald-200";
 
-type Stat = { label: string; value: string; hint?: string; icon: LucideIcon; tone?: "primary" | "accent" | "warning" };
+const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-function StatCard({ s }: { s: Stat }) {
-  const cls =
-    s.tone === "warning" ? "bg-destructive/10 text-destructive"
-    : s.tone === "accent" ? "bg-accent/10 text-accent"
-    : "bg-primary/10 text-primary";
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">{s.label}</CardTitle>
-        <div className={`flex h-8 w-8 items-center justify-center rounded-md ${cls}`}>
-          <s.icon className="h-4 w-4" />
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-semibold tracking-tight">{s.value}</div>
-        {s.hint && <p className="mt-1 text-xs text-muted-foreground">{s.hint}</p>}
-      </CardContent>
-    </Card>
-  );
-}
+/** Derives a sample-journey stage from an order's lab_order_status, used for the Sample Tracking tab. */
+const stageFromOrderStatus = (status: LabOrderStatus): SampleStage =>
+  status === "Pending" ? "Collected"
+  : status === "Collected" ? "Received by Lab"
+  : status === "Processing" ? "Processing"
+  : "Results Ready";
 
-/** User identity card shown on every dashboard below the header */
-function UserCredentialCard({ name, role, email, department, facility, phone, initials }: {
-  name: string; role: string | null; email: string;
-  department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  return (
-    <Card className="border-primary/20 bg-primary/5">
-      <CardContent className="py-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <Avatar className="h-14 w-14 shrink-0">
-            <AvatarFallback className="bg-primary text-primary-foreground text-lg font-bold">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <p className="text-base font-semibold truncate">{name}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <Badge className="bg-primary/20 text-primary border-primary/30 hover:bg-primary/20">
-                <Shield className="mr-1 h-3 w-3" />{role ?? "Pending"}
-              </Badge>
-              {department && (
-                <Badge variant="outline" className="text-xs">
-                  <Building2 className="mr-1 h-3 w-3" />{department}
-                </Badge>
-              )}
-            </div>
-            <Separator className="my-2" />
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{email}</span>
-              {phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{phone}</span>}
-              <span className="flex items-center gap-1"><Building2 className="h-3 w-3" />{facility}</span>
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-const tooltipStyle = {
-  background: "var(--color-card)",
-  border: "1px solid var(--color-border)",
-  borderRadius: 8,
-  fontSize: 12,
-};
-
-// ── Role dashboards ────────────────────────────────────────────
-
-function AdminDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const [lowStockItems, setLowStockItems] = useState<Array<{ name: string; qty: number; unit: string }>>([]);
-
-  useEffect(() => {
-    const fetchLowStock = async () => {
-      const { data } = await supabase
-        .from("pharmacy_drugs")
-        .select("name, stock, unit, reorder_level");
-      const low = (data ?? [])
-        .filter((d) => d.stock < d.reorder_level)
-        .map((d) => ({ name: d.name, qty: d.stock, unit: d.unit }))
-        .slice(0, 4);
-      setLowStockItems(low);
-    };
-    fetchLowStock();
-  }, []);
-
-  const stats: Stat[] = [
-    { label: "Patients Today",          value: "142",   icon: Users,         tone: "primary" },
-    { label: "Currently Waiting (OPD)", value: "23",    icon: ListOrdered,   tone: "primary" },
-    { label: "Beds Occupied",           value: "67/80", hint: "84% capacity", icon: BedDouble, tone: "accent" },
-    { label: "Drug Stock Alerts",       value: String(lowStockItems.length),     icon: AlertTriangle, tone: "warning" },
-  ];
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Welcome back, {name}. Here's today's facility snapshot.</p>
-      </div>
-      <UserCredentialCard name={name} role="Admin" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Patient Visits This Week</CardTitle></CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={weekVisits} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <XAxis dataKey="day" stroke="var(--color-muted-foreground)" fontSize={12} />
-                <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Line type="monotone" dataKey="visits" stroke="var(--color-primary)" strokeWidth={2.5}
-                  dot={{ r: 4, fill: "var(--color-primary)" }} activeDot={{ r: 6 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-base">Top 5 Diagnoses This Month</CardTitle></CardHeader>
-          <CardContent className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={diagnoses} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                <XAxis dataKey="name" stroke="var(--color-muted-foreground)" fontSize={12} />
-                <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="cases" fill="var(--color-accent)" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader><CardTitle className="text-base">Recent Patients</CardTitle></CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead><TableHead>National ID</TableHead>
-                    <TableHead>Time</TableHead><TableHead>Department</TableHead><TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recentPatients.map((p) => (
-                    <TableRow key={p.id}>
-                      <TableCell className="font-medium">{p.name}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{p.id}</TableCell>
-                      <TableCell className="text-muted-foreground">{p.time}</TableCell>
-                      <TableCell>{p.dept}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={STATUS_CLASS[p.status] ?? ""}>{p.status}</Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Low Stock Alerts</CardTitle>
-            <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{lowStockItems.length} items</Badge>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {lowStockItems.map((d) => (
-              <div key={d.name} className="flex items-start justify-between gap-3 rounded-md border bg-card p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{d.name}</p>
-                  <p className="text-xs text-muted-foreground">{d.qty} {d.unit} remaining</p>
-                </div>
-                <Badge variant="outline" className="shrink-0 border-destructive/30 bg-destructive/10 text-destructive">
-                  <AlertTriangle className="mr-1 h-3 w-3" />Low
-                </Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function ClinicianDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const stats: Stat[] = [
-    { label: "My Queue Today",      value: String(myQueue.length),          icon: ListOrdered,   tone: "primary" },
-    { label: "Awaiting My Review",  value: "2",                             icon: Clock,         tone: "accent" },
-    { label: "Critical Lab Results",value: String(criticalResults.length),  icon: FlaskConical,  tone: "warning" },
-    { label: "Referrals Sent",      value: "3",                             icon: Share2,        tone: "primary" },
-  ];
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Good morning, {name}. Your clinical workload for today.</p>
-      </div>
-      <UserCredentialCard name={name} role="Clinician" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">My OPD Queue</CardTitle></CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow><TableHead>Queue #</TableHead><TableHead>Patient</TableHead><TableHead>Triage</TableHead><TableHead>Wait</TableHead><TableHead>Status</TableHead></TableRow>
-              </TableHeader>
-              <TableBody>
-                {myQueue.map((q) => (
-                  <TableRow key={q.queueNo}>
-                    <TableCell className="font-mono text-xs">{q.queueNo}</TableCell>
-                    <TableCell className="font-medium">{q.patient}</TableCell>
-                    <TableCell><Badge variant="outline">{q.triage}</Badge></TableCell>
-                    <TableCell className="text-muted-foreground">{q.wait}</TableCell>
-                    <TableCell><Badge variant="outline" className={STATUS_CLASS[q.status] ?? ""}>{q.status}</Badge></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              Critical Lab Results
-              <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{criticalResults.length} critical</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {criticalResults.map((r) => (
-              <div key={r.patient + r.test} className="rounded-md border border-destructive/20 bg-destructive/5 p-3">
-                <p className="text-sm font-medium">{r.patient}</p>
-                <p className="text-xs text-muted-foreground">{r.test}: <span className="font-semibold text-destructive">{r.result}</span></p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function NurseDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const stats: Stat[] = [
-    { label: "Waiting in OPD",  value: "5",  icon: ListOrdered,  tone: "primary" },
-    { label: "Triaged Today",   value: "14", icon: CheckCircle2, tone: "accent" },
-    { label: "Red Triage",      value: "1",  icon: AlertTriangle, tone: "warning" },
-    { label: "Total Check-ins", value: "23", icon: Users,         tone: "primary" },
-  ];
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Good morning, {name}. OPD triage overview for today.</p>
-      </div>
-      <UserCredentialCard name={name} role="Nurse" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <Card>
-        <CardHeader><CardTitle className="text-base">Current OPD Queue</CardTitle></CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow><TableHead>Queue #</TableHead><TableHead>Patient</TableHead><TableHead>Triage</TableHead><TableHead>Wait</TableHead><TableHead>Status</TableHead></TableRow>
-            </TableHeader>
-            <TableBody>
-              {myQueue.map((q) => (
-                <TableRow key={q.queueNo}>
-                  <TableCell className="font-mono text-xs">{q.queueNo}</TableCell>
-                  <TableCell className="font-medium">{q.patient}</TableCell>
-                  <TableCell><Badge variant="outline">{q.triage}</Badge></TableCell>
-                  <TableCell className="text-muted-foreground">{q.wait}</TableCell>
-                  <TableCell><Badge variant="outline" className={STATUS_CLASS[q.status] ?? ""}>{q.status}</Badge></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function PharmacistDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const [lowStockItems, setLowStockItems] = useState<Array<{ name: string; qty: number; unit: string }>>([]);
-
-  useEffect(() => {
-    const fetchLowStock = async () => {
-      const { data } = await supabase
-        .from("pharmacy_drugs")
-        .select("name, stock, unit, reorder_level");
-      const low = (data ?? [])
-        .filter((d) => d.stock < d.reorder_level)
-        .map((d) => ({ name: d.name, qty: d.stock, unit: d.unit }))
-        .slice(0, 4);
-      setLowStockItems(low);
-    };
-    fetchLowStock();
-  }, []);
-
-  const stats: Stat[] = [
-    { label: "Prescriptions to Dispense", value: String(pendingPrescriptions.length), icon: Pill,          tone: "primary" },
-    { label: "Out of Stock",              value: "1",                                  icon: AlertTriangle, tone: "warning" },
-    { label: "Low Stock Items",           value: String(lowStockItems.length),              icon: AlertTriangle, tone: "accent" },
-    { label: "Dispensed Today",           value: "18",                                 icon: CheckCircle2,  tone: "primary" },
-  ];
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Good morning, {name}. Pharmacy workload for today.</p>
-      </div>
-      <UserCredentialCard name={name} role="Pharmacist" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Pending Prescriptions</CardTitle></CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow><TableHead>Patient</TableHead><TableHead>Drug</TableHead><TableHead>Dose</TableHead><TableHead>Qty</TableHead></TableRow>
-              </TableHeader>
-              <TableBody>
-                {pendingPrescriptions.map((p) => (
-                  <TableRow key={p.patient + p.drug}>
-                    <TableCell className="font-medium">{p.patient}</TableCell>
-                    <TableCell className="text-sm">{p.drug}</TableCell>
-                    <TableCell className="text-muted-foreground">{p.dose}</TableCell>
-                    <TableCell>{p.qty}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Low Stock Alerts</CardTitle>
-            <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{lowStockItems.length} items</Badge>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {lowStockItems.map((d) => (
-              <div key={d.name} className="flex items-start justify-between gap-3 rounded-md border bg-card p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{d.name}</p>
-                  <p className="text-xs text-muted-foreground">{d.qty} {d.unit} remaining</p>
-                </div>
-                <Badge variant="outline" className="shrink-0 border-destructive/30 bg-destructive/10 text-destructive">
-                  <AlertTriangle className="mr-1 h-3 w-3" />Low
-                </Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function LabDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const pending = pendingLabOrders.filter((o) => o.status === "Pending").length;
-  const processing = pendingLabOrders.filter((o) => o.status === "Processing").length;
-  const stats: Stat[] = [
-    { label: "Pending Orders",   value: String(pending),                    icon: FlaskConical, tone: "primary" },
-    { label: "Processing",       value: String(processing),                 icon: Clock,        tone: "accent" },
-    { label: "Critical Results", value: String(criticalResults.length),     icon: AlertTriangle, tone: "warning" },
-    { label: "Completed Today",  value: "4",                                icon: CheckCircle2, tone: "primary" },
-  ];
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Good morning, {name}. Lab workload for today.</p>
-      </div>
-      <UserCredentialCard name={name} role="Lab Technician" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Active Lab Orders</CardTitle></CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow><TableHead>Order #</TableHead><TableHead>Patient</TableHead><TableHead>Tests</TableHead><TableHead>Priority</TableHead><TableHead>Status</TableHead></TableRow>
-              </TableHeader>
-              <TableBody>
-                {pendingLabOrders.map((o) => (
-                  <TableRow key={o.id}>
-                    <TableCell className="font-mono text-xs">{o.id}</TableCell>
-                    <TableCell className="font-medium">{o.patient}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{o.tests.join(", ")}</TableCell>
-                    <TableCell><Badge variant="outline">{o.priority}</Badge></TableCell>
-                    <TableCell><Badge variant="outline">{o.status}</Badge></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              Critical Results
-              <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{criticalResults.length}</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {criticalResults.map((r) => (
-              <div key={r.patient + r.test} className="rounded-md border border-destructive/20 bg-destructive/5 p-3">
-                <p className="text-sm font-medium">{r.patient}</p>
-                <p className="text-xs">{r.test}: <span className="font-semibold text-destructive">{r.result}</span> — <span className="text-destructive">{r.flag}</span></p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function FinanceDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const stats: Stat[] = [
-    { label: "Today's Revenue",     value: "KES 98,100",               icon: Receipt,       tone: "primary" },
-    { label: "Pending Payments",    value: String(pendingBilling.length), icon: Clock,       tone: "warning" },
-    { label: "NHIF Claims Pending", value: "2",                         icon: AlertTriangle, tone: "accent" },
-    { label: "Transactions Today",  value: "34",                        icon: CheckCircle2,  tone: "primary" },
-  ];
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Good morning, {name}. Revenue and billing overview.</p>
-      </div>
-      <UserCredentialCard name={name} role="Finance Officer" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Revenue by Payment Method</CardTitle></CardHeader>
-          <CardContent className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={revenue} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                <XAxis dataKey="method" stroke="var(--color-muted-foreground)" fontSize={12} />
-                <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="amount" fill="var(--color-primary)" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-base">Pending Payments</CardTitle></CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow><TableHead>Receipt</TableHead><TableHead>Patient</TableHead><TableHead>Amount</TableHead><TableHead>Method</TableHead></TableRow>
-              </TableHeader>
-              <TableBody>
-                {pendingBilling.map((b) => (
-                  <TableRow key={b.receipt}>
-                    <TableCell className="font-mono text-xs">{b.receipt}</TableCell>
-                    <TableCell className="font-medium">{b.patient}</TableCell>
-                    <TableCell>KES {b.amount.toLocaleString()}</TableCell>
-                    <TableCell>{b.method}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-// ── Root router ────────────────────────────────────────────────────
-function Dashboard() {
+function NewOrderDialog({ onCreated }: { onCreated: () => void }) {
   const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [selectedPatient, setSelectedPatient] = useState<PatientOption | null>(null);
+  const [tests, setTests] = useState<string[]>([]);
+  const [priority, setPriority] = useState<LabPriority>("Routine");
+  const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  if (!user) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading your dashboard…</p>
-      </div>
-    );
-  }
+  const matches = useMemo(() => {
+    if (!query) return [];
+    const q = query.toLowerCase();
+    return patients.filter(p => p.full_name.toLowerCase().includes(q) || p.national_id.includes(q)).slice(0, 5);
+  }, [query, patients]);
 
-  // All user credentials come directly from the Supabase profile
-  const props = {
-    name:       user.name,
-    email:      user.email,
-    department: user.department,
-    facility:   user.facility,
-    phone:      user.phone,
-    initials:   user.initials,
+  useEffect(() => {
+    if (!query.trim()) {
+      setPatients([]);
+      return;
+    }
+    const searchPatients = async () => {
+      setSearching(true);
+      const q = query.toLowerCase();
+      const { data, error } = await supabase
+        .from("patients")
+        .select("id, full_name, national_id, gender, dob")
+        .or(`full_name.ilike.%${q}%,national_id.ilike.%${q}%`)
+        .limit(5);
+      if (error) {
+        console.error("Failed to search patients:", error);
+      }
+      setPatients(data ?? []);
+      setSearching(false);
+    };
+    searchPatients();
+  }, [query]);
+
+  const reset = () => {
+    setQuery("");
+    setSelectedPatient(null);
+    setTests([]);
+    setPriority("Routine");
   };
 
-  switch (user.role) {
-    case "Admin":          return <AdminDashboard      {...props} />;
-    case "Clinician":      return <ClinicianDashboard  {...props} />;
-    case "Nurse":          return <NurseDashboard       {...props} />;
-    case "Pharmacist":     return <PharmacistDashboard  {...props} />;
-    case "Lab Technician": return <LabDashboard          {...props} />;
-    case "Finance Officer":return <FinanceDashboard      {...props} />;
-    default:
-      return (
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <p className="text-sm text-muted-foreground">No dashboard available for your role.</p>
+  const submit = async () => {
+    if (!selectedPatient || tests.length === 0) {
+      toast.error("Select a patient and at least one test");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const orderNo = `LAB-${Date.now().toString().slice(-6)}`;
+      const { error } = await supabase.from("lab_orders").insert({
+        order_no: orderNo,
+        patient_id: selectedPatient.id,
+        patient_name: selectedPatient.full_name,
+        national_id: selectedPatient.national_id,
+        tests,
+        ordered_by: user?.id ?? null,
+        ordered_by_name: user?.name ?? null,
+        priority,
+        status: "Pending",
+      });
+      if (error) {
+        console.error("Failed to create lab order:", error);
+        toast.error("Failed to create lab order");
+        return;
+      }
+      toast.success(`Order ${orderNo} created`);
+      reset();
+      setOpen(false);
+      onCreated();
+    } catch (err) {
+      console.error(err);
+      toast.error("Error creating lab order");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
+      <DialogTrigger asChild>
+        <Button className="bg-[#0057A8] hover:bg-[#0057A8]/90"><Plus className="h-4 w-4 mr-1" /> New Lab Order</Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>New Lab Order</DialogTitle></DialogHeader>
+
+        <div className="space-y-2">
+          <Label>Patient</Label>
+          {selectedPatient ? (
+            <div className="flex items-center justify-between rounded-md border p-3 bg-muted/40">
+              <div>
+                <p className="font-medium">{selectedPatient.full_name}</p>
+                <p className="text-xs text-muted-foreground">ID: {selectedPatient.national_id} • {selectedPatient.gender}</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedPatient(null)}>Change</Button>
+            </div>
+          ) : (
+            <>
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input className="pl-8" placeholder="Search by name or National ID" value={query} onChange={(e) => setQuery(e.target.value)} />
+              </div>
+              {searching && <p className="text-xs text-muted-foreground">Searching…</p>}
+              {matches.length > 0 && (
+                <div className="rounded-md border divide-y max-h-40 overflow-auto">
+                  {matches.map((p) => (
+                    <button key={p.id} onClick={() => setSelectedPatient(p)} className="w-full text-left px-3 py-2 hover:bg-muted text-sm">
+                      <span className="font-medium">{p.full_name}</span> <span className="text-muted-foreground">• {p.national_id}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
-      );
-  }
+
+        <div className="space-y-2">
+          <Label>Tests</Label>
+          <div className="grid grid-cols-2 gap-2 rounded-md border p-3 max-h-56 overflow-auto">
+            {LAB_TESTS.map((t) => {
+              const checked = tests.includes(t);
+              return (
+                <label key={t} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(v) =>
+                      setTests((prev) => v ? [...prev, t] : prev.filter(x => x !== t))
+                    }
+                  />
+                  {t}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Priority</Label>
+          <Select value={priority} onValueChange={(v) => setPriority(v as LabPriority)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Routine">Routine</SelectItem>
+              <SelectItem value="Urgent">Urgent</SelectItem>
+              <SelectItem value="STAT">STAT</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button className="bg-[#0057A8] hover:bg-[#0057A8]/90" onClick={submit} disabled={submitting}>
+            {submitting ? "Creating…" : "Create Order"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LaboratoryPage() {
+  const [orders, setOrders] = useState<LabOrderRow[]>([]);
+  const [results, setResults] = useState<LabResultRow[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [resultsLoading, setResultsLoading] = useState(true);
+
+  const fetchOrders = useCallback(async () => {
+    setOrdersLoading(true);
+    const { data, error } = await supabase
+      .from("lab_orders")
+      .select("id, order_no, patient_id, patient_name, national_id, tests, ordered_by_name, priority, status, created_at")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("Failed to load lab orders:", error);
+      toast.error("Failed to load lab orders");
+      setOrders([]);
+    } else {
+      setOrders(data ?? []);
+    }
+    setOrdersLoading(false);
+  }, []);
+
+  const fetchResults = useCallback(async () => {
+    setResultsLoading(true);
+    const { data, error } = await supabase
+      .from("lab_results")
+      .select(
+        "id, order_id, test_name, result, reference_range, flag, is_critical, verified_by_name, sample_id, created_at, lab_orders(patient_name)",
+      )
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("Failed to load lab results:", error);
+      toast.error("Failed to load lab results");
+      setResults([]);
+    } else {
+      type ResultJoinRow = {
+        id: string;
+        order_id: string;
+        test_name: string;
+        result: string;
+        reference_range: string | null;
+        flag: ResultFlag;
+        is_critical: boolean;
+        verified_by_name: string | null;
+        sample_id: string | null;
+        created_at: string;
+        lab_orders: { patient_name: string } | null;
+      };
+      const rows = (data ?? []) as unknown as ResultJoinRow[];
+      const mapped: LabResultRow[] = rows.map((r) => ({
+        id: r.id,
+        order_id: r.order_id,
+        test_name: r.test_name,
+        result: r.result,
+        reference_range: r.reference_range,
+        flag: r.flag,
+        is_critical: r.is_critical,
+        verified_by_name: r.verified_by_name,
+        sample_id: r.sample_id,
+        created_at: r.created_at,
+        patient_name: r.lab_orders?.patient_name ?? "—",
+      }));
+      setResults(mapped);
+    }
+    setResultsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchOrders();
+    fetchResults();
+  }, [fetchOrders, fetchResults]);
+
+  const criticals = useMemo(() => results.filter((r) => r.is_critical), [results]);
+
+  // Sample tracking is derived from existing orders, mapping each order's
+  // lab_order_status onto the physical sample journey stages.
+  const sampleTracks = useMemo(
+    () =>
+      orders.map((o) => ({
+        sampleId: `SMP-${o.order_no.replace(/\D/g, "").slice(-4) || o.id.slice(0, 4).toUpperCase()}`,
+        patient: o.patient_name,
+        test: o.tests[0] ?? "—",
+        stage: stageFromOrderStatus(o.status),
+        updated: fmtTime(o.created_at),
+      })),
+    [orders],
+  );
+
+  return (
+    <div className="space-y-4 p-4 md:p-6">
+      <div className="flex items-center gap-2">
+        <FlaskConical className="h-6 w-6 text-[#0057A8]" />
+        <h1 className="text-2xl font-semibold">Laboratory</h1>
+      </div>
+
+      <Tabs defaultValue="orders" className="w-full">
+        <TabsList>
+          <TabsTrigger value="orders">Test Orders</TabsTrigger>
+          <TabsTrigger value="results">Results</TabsTrigger>
+          <TabsTrigger value="samples">Sample Tracking</TabsTrigger>
+        </TabsList>
+
+        {/* ORDERS */}
+        <TabsContent value="orders" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">{orders.length} active orders</p>
+            <NewOrderDialog onCreated={() => { fetchOrders(); fetchResults(); }} />
+          </div>
+          <Card>
+            <CardContent className="p-0">
+              {ordersLoading ? (
+                <div className="p-4"><TableSkeleton cols={8} /></div>
+              ) : orders.length === 0 ? (
+                <EmptyState
+                  icon={<FlaskConical className="h-6 w-6" />}
+                  title="No lab orders yet"
+                  description="New orders created here will appear in real time."
+                  className="border-0"
+                />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Order ID</TableHead>
+                      <TableHead>Patient</TableHead>
+                      <TableHead>Tests</TableHead>
+                      <TableHead>Ordered By</TableHead>
+                      <TableHead>Time</TableHead>
+                      <TableHead>Priority</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {orders.map((o) => (
+                      <TableRow key={o.id}>
+                        <TableCell className="font-mono text-xs">{o.order_no}</TableCell>
+                        <TableCell className="font-medium">{o.patient_name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground max-w-[260px]">{o.tests.join(", ")}</TableCell>
+                        <TableCell>{o.ordered_by_name ?? "—"}</TableCell>
+                        <TableCell>{fmtTime(o.created_at)}</TableCell>
+                        <TableCell><Badge variant="outline" className={priorityClass(o.priority)}>{o.priority}</Badge></TableCell>
+                        <TableCell>
+                          <Select
+                            value={o.status}
+                            onValueChange={async (v) => {
+                              const nextStatus = v as LabOrderStatus;
+                              const { error } = await supabase
+                                .from("lab_orders")
+                                .update({ status: nextStatus })
+                                .eq("id", o.id);
+                              if (error) {
+                                console.error("Failed to update order status:", error);
+                                toast.error("Failed to update status");
+                                return;
+                              }
+                              setOrders((prev) =>
+                                prev.map((row) => (row.id === o.id ? { ...row, status: nextStatus } : row)),
+                              );
+                              toast.success(`Order ${o.order_no} marked ${nextStatus}`);
+                            }}
+                          >
+                            <SelectTrigger className="h-8 w-[130px]">
+                              <Badge variant="outline" className={statusClass(o.status)}>{o.status}</Badge>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Pending">Pending</SelectItem>
+                              <SelectItem value="Collected">Collected</SelectItem>
+                              <SelectItem value="Processing">Processing</SelectItem>
+                              <SelectItem value="Completed">Completed</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm">View</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* RESULTS */}
+        <TabsContent value="results" className="space-y-4">
+          {criticals.map((c) => (
+            <div key={c.id} className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-red-800">
+              <AlertTriangle className="h-5 w-5 mt-0.5" />
+              <p className="text-sm font-medium">
+                ⚠ Critical Value: Patient {c.patient_name} — {c.test_name.replace(/\s*\(.*\)/, "")} {c.result}
+              </p>
+            </div>
+          ))}
+          <Card>
+            <CardContent className="p-0">
+              {resultsLoading ? (
+                <div className="p-4"><TableSkeleton cols={9} /></div>
+              ) : results.length === 0 ? (
+                <EmptyState
+                  icon={<FlaskConical className="h-6 w-6" />}
+                  title="No results recorded yet"
+                  description="Verified lab results will show up here as they're entered."
+                  className="border-0"
+                />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Order ID</TableHead>
+                      <TableHead>Patient</TableHead>
+                      <TableHead>Test</TableHead>
+                      <TableHead>Result</TableHead>
+                      <TableHead>Reference Range</TableHead>
+                      <TableHead>Flag</TableHead>
+                      <TableHead>Verified By</TableHead>
+                      <TableHead>Time</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {results.map((r) => {
+                      const abnormal = r.flag !== "Normal";
+                      return (
+                        <TableRow key={r.id} className={abnormal ? "bg-red-50/40" : ""}>
+                          <TableCell className="font-mono text-xs">{r.order_id.slice(0, 8)}</TableCell>
+                          <TableCell className="font-medium">{r.patient_name}</TableCell>
+                          <TableCell>{r.test_name}</TableCell>
+                          <TableCell className={abnormal ? "font-semibold text-red-700" : ""}>{r.result}</TableCell>
+                          <TableCell className="text-muted-foreground">{r.reference_range ?? "—"}</TableCell>
+                          <TableCell><Badge variant="outline" className={flagClass(r.flag)}>{r.flag}</Badge></TableCell>
+                          <TableCell>{r.verified_by_name ?? "—"}</TableCell>
+                          <TableCell>{fmtTime(r.created_at)}</TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="outline" size="sm" onClick={() => toast.success("Sending to printer…")}>
+                              <Printer className="h-3.5 w-3.5 mr-1" /> Print
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* SAMPLES */}
+        <TabsContent value="samples" className="space-y-4">
+          <Card>
+            <CardHeader><CardTitle className="text-base">Sample Journey</CardTitle></CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between gap-2">
+                {SAMPLE_STAGES.map((s, i) => (
+                  <div key={s} className="flex-1 flex items-center">
+                    <div className="flex flex-col items-center text-center flex-1">
+                      <div className="h-9 w-9 rounded-full bg-[#0057A8] text-white grid place-content-center text-sm font-semibold">{i + 1}</div>
+                      <p className="mt-2 text-xs md:text-sm font-medium">{s}</p>
+                    </div>
+                    {i < SAMPLE_STAGES.length - 1 && <div className="h-0.5 flex-1 bg-[#0057A8]/30" />}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-0">
+              {ordersLoading ? (
+                <div className="p-4"><TableSkeleton cols={6} /></div>
+              ) : sampleTracks.length === 0 ? (
+                <EmptyState
+                  icon={<FlaskConical className="h-6 w-6" />}
+                  title="No samples in transit"
+                  description="Samples linked to lab orders will be tracked here."
+                  className="border-0"
+                />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Sample ID</TableHead>
+                      <TableHead>Patient</TableHead>
+                      <TableHead>Test</TableHead>
+                      <TableHead>Progress</TableHead>
+                      <TableHead>Current Stage</TableHead>
+                      <TableHead>Updated</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sampleTracks.map((s) => {
+                      const idx = SAMPLE_STAGES.indexOf(s.stage);
+                      return (
+                        <TableRow key={s.sampleId}>
+                          <TableCell className="font-mono text-xs">{s.sampleId}</TableCell>
+                          <TableCell className="font-medium">{s.patient}</TableCell>
+                          <TableCell>{s.test}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              {SAMPLE_STAGES.map((_, i) => (
+                                <div key={i} className={`h-1.5 w-8 rounded-full ${i <= idx ? "bg-[#00A651]" : "bg-slate-200"}`} />
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={s.stage === "Results Ready" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-sky-100 text-sky-700 border-sky-200"}>
+                              {s.stage === "Results Ready" && <Check className="h-3 w-3 mr-1" />}
+                              {s.stage}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{s.updated}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
 }
