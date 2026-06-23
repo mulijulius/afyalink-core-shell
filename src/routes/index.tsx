@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
 import {
   LineChart, Line, BarChart, Bar,
@@ -7,7 +7,7 @@ import {
 import {
   Users, ListOrdered, BedDouble, AlertTriangle,
   FlaskConical, Pill, Receipt, Share2, Clock,
-  CheckCircle2, Building2, Phone, Mail, Shield,
+  CheckCircle2, Building2, Phone, Mail, Shield, Activity,
   type LucideIcon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1091,9 +1091,196 @@ function Dashboard() {
     initials:   user.initials,
   };
 
-  switch (user.role) {
+function DoctorDashboard({ name, email, department, facility, phone, initials }: {
+  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
+}) {
+  const [queue, setQueue] = useState<
+    Array<{ queueNo: string; patient: string; patientId: string | null; triage: Triage; wait: string; status: string }>
+  >([]);
+  const [criticalResults, setCriticalResults] = useState<
+    Array<{ patient: string; test: string; result: string }>
+  >([]);
+  const [prescriptionsToday, setPrescriptionsToday] = useState<number | null>(null);
+  const [diagnosesToday, setDiagnosesToday] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const run = async () => {
+      const since = startOfToday();
+      const [
+        { data: queueRows, error: queueError },
+        { data: critRows, error: critError },
+        { count: rxCount },
+        { count: dxCount },
+      ] = await Promise.all([
+        supabase
+          .from("opd_queue")
+          .select("queue_no, patient_name, patient_id, check_in_time, triage, status")
+          .neq("status", "Done")
+          .order("check_in_time", { ascending: true })
+          .limit(6),
+        supabase
+          .from("lab_results")
+          .select("test_name, result, lab_orders(patient_name)")
+          .eq("is_critical", true)
+          .order("created_at", { ascending: false })
+          .limit(5),
+        supabase.from("prescriptions").select("id", { count: "exact", head: true }).gte("created_at", since),
+        supabase.from("diagnoses").select("id", { count: "exact", head: true }).gte("created_at", since),
+      ]);
+
+      if (queueError) {
+        console.error("Failed to load queue:", queueError);
+        setQueue([]);
+      } else {
+        setQueue(
+          (queueRows ?? []).map((q) => ({
+            queueNo: q.queue_no,
+            patient: q.patient_name,
+            patientId: q.patient_id ?? null,
+            triage: q.triage,
+            wait: fmtWait(q.check_in_time),
+            status: q.status,
+          })),
+        );
+      }
+
+      if (critError) {
+        console.error("Failed to load critical results:", critError);
+        setCriticalResults([]);
+      } else {
+        type CritJoinRow = { test_name: string; result: string; lab_orders: { patient_name: string } | null };
+        const rows = (critRows ?? []) as unknown as CritJoinRow[];
+        setCriticalResults(
+          rows.map((r) => ({
+            patient: r.lab_orders?.patient_name ?? "—",
+            test: r.test_name,
+            result: r.result,
+          })),
+        );
+      }
+
+      setPrescriptionsToday(rxCount ?? 0);
+      setDiagnosesToday(dxCount ?? 0);
+      setLoading(false);
+    };
+    run();
+  }, []);
+
+  const stats: Stat[] = [
+    { label: "OPD Waiting",          value: String(queue.length),                                     icon: ListOrdered,  tone: "primary" },
+    { label: "Critical Lab Results", value: String(criticalResults.length),                           icon: FlaskConical, tone: "warning" },
+    { label: "Diagnoses Today",      value: diagnosesToday === null ? "—" : String(diagnosesToday),   icon: Activity,     tone: "primary" },
+    { label: "Prescriptions Today",  value: prescriptionsToday === null ? "—" : String(prescriptionsToday), icon: Pill, tone: "primary" },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Doctor Dashboard</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Good morning, Dr. {name.split(" ")[0]}. Your clinical workspace for today.
+        </p>
+      </div>
+      <UserCredentialCard name={name} role="Doctor" email={email} department={department} facility={facility} phone={phone} initials={initials} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {stats.map((s) => <StatCard key={s.label} s={s} />)}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="text-base">OPD Queue</CardTitle>
+            <Link to="/clinical" className="text-xs text-primary underline-offset-2 hover:underline">
+              Open Clinical Workspace →
+            </Link>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <TableSkeleton cols={4} rows={4} />
+            ) : queue.length === 0 ? (
+              <EmptyState icon={<ListOrdered className="h-6 w-6" />} title="Queue is empty" className="border-0" />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Queue #</TableHead>
+                    <TableHead>Patient</TableHead>
+                    <TableHead>Triage</TableHead>
+                    <TableHead>Wait</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {queue.map((q) => (
+                    <TableRow key={q.queueNo}>
+                      <TableCell className="font-mono text-xs">{q.queueNo}</TableCell>
+                      <TableCell className="font-medium">
+                        {q.patientId ? (
+                          <Link
+                            to="/clinical/$patientId"
+                            params={{ patientId: q.patientId }}
+                            className="text-primary hover:underline underline-offset-2"
+                          >
+                            {q.patient}
+                          </Link>
+                        ) : (
+                          q.patient
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={
+                          q.triage === "Red" ? "border-red-500/30 bg-red-500/10 text-red-700"
+                          : q.triage === "Orange" ? "border-orange-500/30 bg-orange-500/10 text-orange-700"
+                          : ""
+                        }>
+                          {q.triage}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{q.wait}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              Critical Lab Results
+              {criticalResults.length > 0 && (
+                <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">
+                  {criticalResults.length} critical
+                </Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {loading ? (
+              <TableSkeleton cols={1} rows={3} />
+            ) : criticalResults.length === 0 ? (
+              <EmptyState icon={<FlaskConical className="h-6 w-6" />} title="No critical results" className="border-0" />
+            ) : (
+              criticalResults.map((r) => (
+                <div key={r.patient + r.test} className="rounded-md border border-destructive/20 bg-destructive/5 p-3">
+                  <p className="text-sm font-medium">{r.patient}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {r.test}: <span className="font-semibold text-destructive">{r.result}</span>
+                  </p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+
     case "Admin":          return <AdminDashboard      {...props} />;
     case "Clinician":      return <ClinicianDashboard  {...props} />;
+    case "Doctor":         return <DoctorDashboard     {...props} />;
     case "Nurse":          return <NurseDashboard       {...props} />;
     case "Pharmacist":     return <PharmacistDashboard  {...props} />;
     case "Lab Technician": return <LabDashboard          {...props} />;
