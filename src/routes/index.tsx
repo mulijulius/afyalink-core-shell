@@ -1091,6 +1091,23 @@ function Dashboard() {
     initials:   user.initials,
   };
 
+  switch (user.role) {
+    case "Admin":          return <AdminDashboard      {...props} />;
+    case "Clinician":      return <ClinicianDashboard  {...props} />;
+    case "Doctor":         return <DoctorDashboard     {...props} />;
+    case "Nurse":          return <NurseDashboard       {...props} />;
+    case "Pharmacist":     return <PharmacistDashboard  {...props} />;
+    case "Lab Technician": return <LabDashboard          {...props} />;
+    case "Finance Officer":return <FinanceDashboard      {...props} />;
+    default:
+      return (
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <p className="text-sm text-muted-foreground">No dashboard available for your role.</p>
+        </div>
+      );
+  }
+}
+
 function DoctorDashboard({ name, email, department, facility, phone, initials }: {
   name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
 }) {
@@ -1275,21 +1292,4 @@ function DoctorDashboard({ name, email, department, facility, phone, initials }:
       </div>
     </div>
   );
-}
-
-
-    case "Admin":          return <AdminDashboard      {...props} />;
-    case "Clinician":      return <ClinicianDashboard  {...props} />;
-    case "Doctor":         return <DoctorDashboard     {...props} />;
-    case "Nurse":          return <NurseDashboard       {...props} />;
-    case "Pharmacist":     return <PharmacistDashboard  {...props} />;
-    case "Lab Technician": return <LabDashboard          {...props} />;
-    case "Finance Officer":return <FinanceDashboard      {...props} />;
-    default:
-      return (
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <p className="text-sm text-muted-foreground">No dashboard available for your role.</p>
-        </div>
-      );
-  }
 }
