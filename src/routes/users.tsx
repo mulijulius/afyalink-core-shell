@@ -11,7 +11,7 @@ import { useAuth, type Role } from "@/lib/auth";
 
 export const Route = createFileRoute("/users")({ component: UsersPage });
 
-const ROLES: Role[] = ["Clinician", "Nurse", "Pharmacist", "Lab Technician", "Admin", "Finance Officer"];
+const ROLES: Role[] = ["Clinician", "Doctor", "Nurse", "Pharmacist", "Lab Technician", "Admin", "Finance Officer"];
 
 type ProfileRow = {
   id: string; email: string; full_name: string; phone: string | null;
