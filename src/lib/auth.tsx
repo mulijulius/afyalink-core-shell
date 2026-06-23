@@ -4,6 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 
 export type Role =
   | "Clinician"
+  | "Doctor"
   | "Nurse"
   | "Pharmacist"
   | "Lab Technician"
@@ -37,6 +38,7 @@ const Ctx = createContext<AuthCtx | null>(null);
 
 export const ALLOWED_ROUTES: Record<Role, string[]> = {
   Clinician:        ["/", "/patients", "/opd-queue", "/laboratory", "/referrals", "/settings"],
+  Doctor:           ["/", "/patients", "/opd-queue", "/clinical", "/laboratory", "/referrals", "/settings"],
   Nurse:            ["/", "/opd-queue", "/patients", "/settings"],
   Pharmacist:       ["/", "/pharmacy", "/settings"],
   "Lab Technician": ["/", "/laboratory", "/settings"],
