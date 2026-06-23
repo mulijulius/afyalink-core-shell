@@ -12,7 +12,7 @@ import type { Role } from "@/lib/auth";
 
 export const Route = createFileRoute("/login")({ component: LoginPage });
 
-const ROLES: Role[] = ["Clinician", "Nurse", "Pharmacist", "Lab Technician", "Admin", "Finance Officer"];
+const ROLES: Role[] = ["Clinician", "Doctor", "Nurse", "Pharmacist", "Lab Technician", "Admin", "Finance Officer"];
 
 function LoginPage() {
   const navigate = useNavigate();
