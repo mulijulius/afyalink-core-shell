@@ -452,6 +452,168 @@ export type Database = {
         }
         Relationships: []
       }
+      vitals_observations: {
+        Row: {
+          id: string
+          patient_id: string
+          visit_id: string | null
+          recorded_by: string | null
+          recorded_by_name: string | null
+          temperature_c: number | null
+          pulse_bpm: number | null
+          resp_rate: number | null
+          bp_systolic: number | null
+          bp_diastolic: number | null
+          spo2_percent: number | null
+          weight_kg: number | null
+          height_cm: number | null
+          chief_complaint: string | null
+          symptoms: string[]
+          signs: string | null
+          notes: string | null
+          recorded_at: string
+        }
+        Insert: {
+          id?: string
+          patient_id: string
+          visit_id?: string | null
+          recorded_by?: string | null
+          recorded_by_name?: string | null
+          temperature_c?: number | null
+          pulse_bpm?: number | null
+          resp_rate?: number | null
+          bp_systolic?: number | null
+          bp_diastolic?: number | null
+          spo2_percent?: number | null
+          weight_kg?: number | null
+          height_cm?: number | null
+          chief_complaint?: string | null
+          symptoms?: string[]
+          signs?: string | null
+          notes?: string | null
+          recorded_at?: string
+        }
+        Update: {
+          temperature_c?: number | null
+          pulse_bpm?: number | null
+          resp_rate?: number | null
+          bp_systolic?: number | null
+          bp_diastolic?: number | null
+          spo2_percent?: number | null
+          weight_kg?: number | null
+          height_cm?: number | null
+          chief_complaint?: string | null
+          symptoms?: string[]
+          signs?: string | null
+          notes?: string | null
+        }
+        Relationships: [
+          { foreignKeyName: "vitals_observations_patient_id_fkey"; columns: ["patient_id"]; referencedRelation: "patients"; referencedColumns: ["id"] },
+          { foreignKeyName: "vitals_observations_visit_id_fkey"; columns: ["visit_id"]; referencedRelation: "visits"; referencedColumns: ["id"] },
+        ]
+      }
+      diagnoses: {
+        Row: {
+          id: string
+          patient_id: string
+          visit_id: string | null
+          diagnosis: string
+          diagnosis_type: string
+          icd10_code: string | null
+          notes: string | null
+          diagnosed_by: string | null
+          diagnosed_by_name: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          patient_id: string
+          visit_id?: string | null
+          diagnosis: string
+          diagnosis_type?: string
+          icd10_code?: string | null
+          notes?: string | null
+          diagnosed_by?: string | null
+          diagnosed_by_name?: string | null
+          created_at?: string
+        }
+        Update: {
+          diagnosis?: string
+          diagnosis_type?: string
+          icd10_code?: string | null
+          notes?: string | null
+        }
+        Relationships: [
+          { foreignKeyName: "diagnoses_patient_id_fkey"; columns: ["patient_id"]; referencedRelation: "patients"; referencedColumns: ["id"] },
+          { foreignKeyName: "diagnoses_visit_id_fkey"; columns: ["visit_id"]; referencedRelation: "visits"; referencedColumns: ["id"] },
+        ]
+      }
+      medical_history: {
+        Row: {
+          id: string
+          patient_id: string
+          category: string
+          description: string
+          onset_date: string | null
+          status: string
+          recorded_by: string | null
+          recorded_by_name: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          patient_id: string
+          category?: string
+          description: string
+          onset_date?: string | null
+          status?: string
+          recorded_by?: string | null
+          recorded_by_name?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          description?: string
+          onset_date?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "medical_history_patient_id_fkey"; columns: ["patient_id"]; referencedRelation: "patients"; referencedColumns: ["id"] },
+        ]
+      }
+      clinical_summaries: {
+        Row: {
+          id: string
+          patient_id: string
+          visit_id: string | null
+          summary: string
+          authored_by: string | null
+          authored_by_name: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          patient_id: string
+          visit_id?: string | null
+          summary: string
+          authored_by?: string | null
+          authored_by_name?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          summary?: string
+          updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "clinical_summaries_patient_id_fkey"; columns: ["patient_id"]; referencedRelation: "patients"; referencedColumns: ["id"] },
+          { foreignKeyName: "clinical_summaries_visit_id_fkey"; columns: ["visit_id"]; referencedRelation: "visits"; referencedColumns: ["id"] },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -473,6 +635,7 @@ export type Database = {
         | "Lab Technician"
         | "Admin"
         | "Finance Officer"
+        | "Doctor"
       profile_status: "pending" | "approved" | "rejected"
       gender: "Male" | "Female"
       triage_level: "Red" | "Orange" | "Yellow" | "Green" | "Blue"
@@ -594,7 +757,7 @@ export type Enums<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["Clinician","Nurse","Pharmacist","Lab Technician","Admin","Finance Officer"],
+      app_role: ["Clinician","Nurse","Pharmacist","Lab Technician","Admin","Finance Officer","Doctor"],
       profile_status: ["pending", "approved", "rejected"],
       gender: ["Male", "Female"],
       triage_level: ["Red", "Orange", "Yellow", "Green", "Blue"],
