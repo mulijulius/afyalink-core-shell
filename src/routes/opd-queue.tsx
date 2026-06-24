@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { PhoneCall, ArrowRightLeft, UserPlus, Tv, LayoutList } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { PhoneCall, ArrowRightLeft, UserPlus, Tv, LayoutList, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -91,7 +91,7 @@ function OpdQueuePage() {
     const fetchQueue = async () => {
       const { data, error } = await supabase
         .from("opd_queue")
-        .select("id, queue_no, patient_name, check_in_time, triage, assigned_to, status")
+        .select("id, queue_no, patient_id, patient_name, check_in_time, triage, assigned_to, status")
         .order("check_in_time", { ascending: true });
       if (error) {
         console.error("Failed to load queue:", error.message);
@@ -117,7 +117,9 @@ function OpdQueuePage() {
     return c;
   }, [queue]);
 
-  const handleCheckIn = async (entry: Omit<Database["public"]["Tables"]["opd_queue"]["Insert"], "id">) => {
+  const handleCheckIn = async (
+    entry: Omit<Database["public"]["Tables"]["opd_queue"]["Insert"], "id">,
+  ) => {
     setLoading(true);
     const { data, error } = await supabase
       .from("opd_queue")
@@ -136,6 +138,25 @@ function OpdQueuePage() {
       toast.success(`${data.patient_name} checked in as ${data.queue_no}`);
     }
     setLoading(false);
+  };
+
+  /** Mark a queue entry as a specific status */
+  const handleStatusUpdate = async (q: QueueEntry, newStatus: QueueStatus) => {
+    const { error } = await supabase
+      .from("opd_queue")
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .eq("id", q.id);
+
+    if (error) {
+      toast.error(`Failed to update status: ${error.message}`);
+      return;
+    }
+    setQueue((prev) =>
+      prev.map((entry) =>
+        entry.id === q.id ? { ...entry, status: newStatus } : entry,
+      ),
+    );
+    toast.success(`${q.patient_name} → ${newStatus}`);
   };
 
   const handleCall = (q: QueueEntry) =>
@@ -213,7 +234,19 @@ function OpdQueuePage() {
                     return (
                       <TableRow key={q.queue_no}>
                         <TableCell className="font-mono font-medium">{q.queue_no}</TableCell>
-                        <TableCell className="font-medium">{q.patient_name}</TableCell>
+                        <TableCell className="font-medium">
+                          {q.patient_id ? (
+                            <Link
+                              to="/clinical/$patientId"
+                              params={{ patientId: q.patient_id }}
+                              className="text-primary hover:underline underline-offset-2"
+                            >
+                              {q.patient_name}
+                            </Link>
+                          ) : (
+                            q.patient_name
+                          )}
+                        </TableCell>
                         <TableCell className="text-muted-foreground">
                           {new Date(q.check_in_time).toLocaleTimeString([], {
                             hour: "2-digit",
@@ -229,7 +262,7 @@ function OpdQueuePage() {
                         <TableCell className="font-mono text-muted-foreground">
                           {formatWait(q.check_in_time)}
                         </TableCell>
-                        <TableCell className="text-muted-foreground">{q.assigned_to}</TableCell>
+                        <TableCell className="text-muted-foreground">{q.assigned_to ?? "—"}</TableCell>
                         <TableCell>
                           <Badge
                             variant="outline"
@@ -238,7 +271,9 @@ function OpdQueuePage() {
                                 ? "border-primary/30 bg-primary/10 text-primary"
                                 : q.status === "Triaged"
                                   ? "border-accent/30 bg-accent/10 text-accent"
-                                  : ""
+                                  : q.status === "Done"
+                                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
+                                    : ""
                             }
                           >
                             {q.status}
@@ -249,6 +284,34 @@ function OpdQueuePage() {
                             <Button size="sm" variant="ghost" onClick={() => handleCall(q)}>
                               <PhoneCall className="mr-1 h-3.5 w-3.5" /> Call
                             </Button>
+                            {q.patient_id && q.status !== "Done" && (
+                              <Button asChild size="sm" variant="ghost">
+                                <Link
+                                  to="/clinical/$patientId"
+                                  params={{ patientId: q.patient_id }}
+                                >
+                                  <Stethoscope className="mr-1 h-3.5 w-3.5" /> Consult
+                                </Link>
+                              </Button>
+                            )}
+                            {q.status === "Waiting" && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleStatusUpdate(q, "Triaged")}
+                              >
+                                Triage
+                              </Button>
+                            )}
+                            {(q.status === "Waiting" || q.status === "Triaged") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleStatusUpdate(q, "Done")}
+                              >
+                                Done
+                              </Button>
+                            )}
                             <Button size="sm" variant="ghost" onClick={() => handleTransfer(q)}>
                               <ArrowRightLeft className="mr-1 h-3.5 w-3.5" /> Transfer
                             </Button>
