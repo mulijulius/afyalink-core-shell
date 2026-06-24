@@ -25,7 +25,7 @@ import {
 import { useAuth, ALLOWED_ROUTES } from "@/lib/auth";
 
 const items = [
-  { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Patients", url: "/patients", icon: Users },
   { title: "OPD Queue", url: "/opd-queue", icon: ListOrdered },
   { title: "Clinical Workspace", url: "/clinical", icon: Stethoscope },
