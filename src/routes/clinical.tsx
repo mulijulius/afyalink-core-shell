@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   Stethoscope, Search, Eye, ClipboardList, FlaskConical,
   AlertTriangle, Clock, Users as UsersIcon,
@@ -13,6 +13,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/lib/auth";
@@ -76,12 +77,14 @@ export const Route = createFileRoute("/clinical")({
 
 function ClinicalWorkspacePage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [queueLoading, setQueueLoading] = useState(true);
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [patientsLoading, setPatientsLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [criticalCount, setCriticalCount] = useState<number | null>(null);
+  const [consultingId, setConsultingId] = useState<string | null>(null);
 
   const fetchQueue = useCallback(async () => {
     setQueueLoading(true);
@@ -137,12 +140,23 @@ function ClinicalWorkspacePage() {
     [queue],
   );
 
+  /**
+   * Queue filtering by assigned clinician.
+   *
+   * Previous implementation matched only the first name token, causing mismatches
+   * when the full name in profiles didn't share a token with the stored assigned_to
+   * string. Now we match on the full user.name substring (case-insensitive) OR the
+   * full assigned_to string, so "Dr. James Mwangi" will match "James Mwangi".
+   * If nothing matches, show the entire queue so the clinician can still work.
+   */
   const myQueue = useMemo(() => {
     if (!user?.name) return sortedQueue;
-    const firstName = user.name.split(" ")[0]?.toLowerCase() ?? "";
-    const mine = sortedQueue.filter((q) =>
-      (q.assigned_to ?? "").toLowerCase().includes(firstName),
-    );
+    const nameLower = user.name.trim().toLowerCase();
+    const mine = sortedQueue.filter((q) => {
+      const assigned = (q.assigned_to ?? "").toLowerCase();
+      // Match if the stored name contains any part of the user's name or vice-versa
+      return assigned.includes(nameLower) || nameLower.includes(assigned);
+    });
     return mine.length > 0 ? mine : sortedQueue;
   }, [sortedQueue, user]);
 
@@ -156,6 +170,54 @@ function ClinicalWorkspacePage() {
 
   const waitingCount = queue.filter((q) => q.status === "Waiting").length;
   const inConsultCount = queue.filter((q) => q.status === "In Consult").length;
+
+  /**
+   * handleConsult
+   *
+   * 1. Updates the queue row status to "In Consult" so the display screen
+   *    and dashboard counters stay accurate.
+   * 2. Navigates to the clinical consultation workspace for the patient.
+   *
+   * If the queue row has no patient_id (walk-in not yet registered), we
+   * show an error instead of navigating to a broken URL.
+   */
+  const handleConsult = useCallback(
+    async (q: QueueEntry) => {
+      if (!q.patient_id) {
+        toast.error(
+          `${q.patient_name} has no patient record. Register them first under Patients.`,
+        );
+        return;
+      }
+
+      setConsultingId(q.id);
+
+      // Update queue status to "In Consult" if it isn't already
+      if (q.status !== "In Consult") {
+        const { error } = await supabase
+          .from("opd_queue")
+          .update({ status: "In Consult", updated_at: new Date().toISOString() })
+          .eq("id", q.id);
+
+        if (error) {
+          console.error("Failed to update queue status:", error.message);
+          // Non-fatal: still navigate so the clinician isn't blocked
+          toast.warning("Could not update queue status, but opening consultation.");
+        } else {
+          // Optimistically update local state
+          setQueue((prev) =>
+            prev.map((entry) =>
+              entry.id === q.id ? { ...entry, status: "In Consult" as QueueStatus } : entry,
+            ),
+          );
+        }
+      }
+
+      setConsultingId(null);
+      navigate({ to: "/clinical/$patientId", params: { patientId: q.patient_id } });
+    },
+    [navigate],
+  );
 
   return (
     <div className="space-y-6">
@@ -206,10 +268,11 @@ function ClinicalWorkspacePage() {
           <TabsTrigger value="patients"><UsersIcon className="mr-1.5 h-4 w-4" />Patients</TabsTrigger>
         </TabsList>
 
+        {/* ── OPD Queue tab ── */}
         <TabsContent value="queue" className="mt-4 space-y-3">
           <p className="text-sm text-muted-foreground">
-            Patients waiting for or currently in consultation. Open a patient to record vitals,
-            diagnose, prescribe, order labs or refer.
+            Patients waiting for or currently in consultation. Click <strong>Consult</strong> to
+            open the full clinical workspace for that patient.
           </p>
           <Card className="overflow-hidden p-0">
             <div className="overflow-x-auto">
@@ -238,6 +301,7 @@ function ClinicalWorkspacePage() {
                   <TableBody>
                     {myQueue.map((q) => {
                       const meta = TRIAGE_META[q.triage];
+                      const isConsulting = consultingId === q.id;
                       return (
                         <TableRow key={q.id}>
                           <TableCell className="font-mono font-medium">{q.queue_no}</TableCell>
@@ -267,15 +331,29 @@ function ClinicalWorkspacePage() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button asChild size="sm" disabled={!q.patient_id}>
-                              {q.patient_id ? (
-                                <Link to="/clinical/$patientId" params={{ patientId: q.patient_id }}>
-                                  <Stethoscope className="mr-1.5 h-3.5 w-3.5" /> Consult
-                                </Link>
-                              ) : (
-                                <span>No record</span>
-                              )}
-                            </Button>
+                            {q.patient_id ? (
+                              <Button
+                                size="sm"
+                                disabled={isConsulting}
+                                onClick={() => handleConsult(q)}
+                              >
+                                <Stethoscope className="mr-1.5 h-3.5 w-3.5" />
+                                {isConsulting ? "Opening…" : "Consult"}
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-muted-foreground"
+                                onClick={() =>
+                                  toast.error(
+                                    `${q.patient_name} has no patient record. Register them first.`,
+                                  )
+                                }
+                              >
+                                No record
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
@@ -287,6 +365,7 @@ function ClinicalWorkspacePage() {
           </Card>
         </TabsContent>
 
+        {/* ── Patients tab ── */}
         <TabsContent value="patients" className="mt-4 space-y-3">
           <div className="relative max-w-md">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
