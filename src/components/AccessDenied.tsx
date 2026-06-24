@@ -20,7 +20,7 @@ export function AccessDenied({ pathname }: { pathname: string }) {
           Contact your facility administrator if you believe this is an error.
         </p>
         <Button asChild className="mt-6 bg-[#0057A8] hover:bg-[#004a8f]">
-          <Link to="/">Back to Dashboard</Link>
+          <Link to="/dashboard">Back to Dashboard</Link>
         </Button>
       </div>
     </div>
