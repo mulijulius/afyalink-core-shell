@@ -38,7 +38,7 @@ function LoginPage() {
     setBusy(false);
     if (error) { toast.error(error.message); return; }
     toast.success("Welcome back");
-    navigate({ to: "/" });
+    navigate({ to: "/dashboard" });
   };
 
   const onSignUp = async (e: React.FormEvent) => {
@@ -61,12 +61,17 @@ function LoginPage() {
     setBusy(false);
     if (error) { toast.error(error.message); return; }
     toast.success("Account created — waiting for Admin approval");
-    navigate({ to: "/" });
+    navigate({ to: "/dashboard" });
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-white to-emerald-50 px-4 py-10">
       <div className="w-full max-w-md">
+        <div className="mb-4">
+          <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-[#0057A8] transition-colors">
+            ← Back to home
+          </Link>
+        </div>
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center gap-2 mb-3">
             <div className="h-12 w-12 rounded-xl bg-[#0057A8] text-white font-bold flex items-center justify-center text-xl shadow-lg">A</div>
