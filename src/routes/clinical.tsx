@@ -1,5 +1,35 @@
+/**
+ * src/routes/clinical.tsx
+ *
+ * ROOT CAUSE FIX (2026-06-24)
+ * ───────────────────────────
+ * TanStack Router file-based routing treats clinical.$patientId.tsx as a
+ * CHILD route of clinical.tsx (because of the shared "clinical" prefix).
+ *
+ * Visiting /clinical/$patientId renders:
+ *   Root layout → <ClinicalRoute component> → <Outlet/> → <ConsultationWorkspace>
+ *
+ * Without an <Outlet/> in clinical.tsx, TanStack Router has nowhere to mount
+ * the ConsultationWorkspace component, so clicking Consult just re-renders the
+ * queue page — the consultation window never appears.
+ *
+ * FIX: The exported Route component now acts as a layout wrapper:
+ *   • When on /clinical (index, no child route matched) → renders the OPD queue UI.
+ *   • When on /clinical/$patientId (child route matched) → renders only <Outlet/>,
+ *     which mounts ConsultationWorkspace full-screen in the main content area.
+ *
+ * useChildMatches() from @tanstack/react-router returns the active child route
+ * matches. If the array is non-empty we are on a child route → show Outlet only.
+ */
+
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  Outlet,
+  useChildMatches,
+  useNavigate,
+} from "@tanstack/react-router";
 import {
   Stethoscope, Search, Eye, ClipboardList, FlaskConical,
   AlertTriangle, Clock, Users as UsersIcon,
@@ -70,10 +100,35 @@ function formatWait(iso: string) {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
+// ── Route definition ──────────────────────────────────────────────
+
 export const Route = createFileRoute("/clinical")({
   head: () => ({ meta: [{ title: "Clinical Workspace · AfyaLink HMS" }] }),
-  component: ClinicalWorkspacePage,
+  component: ClinicalLayout,
 });
+
+/**
+ * ClinicalLayout
+ *
+ * Acts as a layout wrapper for the /clinical route family.
+ * - On /clinical            → renders ClinicalWorkspacePage (OPD queue + patients)
+ * - On /clinical/$patientId → renders <Outlet/> which mounts ConsultationWorkspace
+ */
+function ClinicalLayout() {
+  const childMatches = useChildMatches();
+  const onChildRoute = childMatches.length > 0;
+
+  // When on the consultation child route, render ONLY the Outlet.
+  // ConsultationWorkspace is full-screen and has its own back button.
+  if (onChildRoute) {
+    return <Outlet />;
+  }
+
+  // On /clinical index, render the OPD queue workspace.
+  return <ClinicalWorkspacePage />;
+}
+
+// ── Clinical Workspace (OPD queue + patients list) ────────────────
 
 function ClinicalWorkspacePage() {
   const { user } = useAuth();
@@ -140,21 +195,13 @@ function ClinicalWorkspacePage() {
     [queue],
   );
 
-  /**
-   * Queue filtering by assigned clinician.
-   *
-   * Previous implementation matched only the first name token, causing mismatches
-   * when the full name in profiles didn't share a token with the stored assigned_to
-   * string. Now we match on the full user.name substring (case-insensitive) OR the
-   * full assigned_to string, so "Dr. James Mwangi" will match "James Mwangi".
-   * If nothing matches, show the entire queue so the clinician can still work.
-   */
+  // Show all queue entries - if assigned_to matches user's name, show those first.
+  // Fall back to full queue if no matches so the doctor is never left with an empty list.
   const myQueue = useMemo(() => {
     if (!user?.name) return sortedQueue;
     const nameLower = user.name.trim().toLowerCase();
     const mine = sortedQueue.filter((q) => {
       const assigned = (q.assigned_to ?? "").toLowerCase();
-      // Match if the stored name contains any part of the user's name or vice-versa
       return assigned.includes(nameLower) || nameLower.includes(assigned);
     });
     return mine.length > 0 ? mine : sortedQueue;
@@ -164,7 +211,9 @@ function ClinicalWorkspacePage() {
     const q = query.trim().toLowerCase();
     if (!q) return patients;
     return patients.filter(
-      (p) => p.full_name.toLowerCase().includes(q) || p.national_id.toLowerCase().includes(q),
+      (p) =>
+        p.full_name.toLowerCase().includes(q) ||
+        p.national_id.toLowerCase().includes(q),
     );
   }, [query, patients]);
 
@@ -174,12 +223,10 @@ function ClinicalWorkspacePage() {
   /**
    * handleConsult
    *
-   * 1. Updates the queue row status to "In Consult" so the display screen
-   *    and dashboard counters stay accurate.
-   * 2. Navigates to the clinical consultation workspace for the patient.
-   *
-   * If the queue row has no patient_id (walk-in not yet registered), we
-   * show an error instead of navigating to a broken URL.
+   * 1. Validates patient_id exists (walk-ins without a registered record can't be consulted).
+   * 2. Updates queue status to "In Consult".
+   * 3. Navigates to /clinical/$patientId — because clinical.tsx now has <Outlet/>,
+   *    TanStack Router will mount ConsultationWorkspace inside that slot.
    */
   const handleConsult = useCallback(
     async (q: QueueEntry) => {
@@ -192,7 +239,6 @@ function ClinicalWorkspacePage() {
 
       setConsultingId(q.id);
 
-      // Update queue status to "In Consult" if it isn't already
       if (q.status !== "In Consult") {
         const { error } = await supabase
           .from("opd_queue")
@@ -201,13 +247,13 @@ function ClinicalWorkspacePage() {
 
         if (error) {
           console.error("Failed to update queue status:", error.message);
-          // Non-fatal: still navigate so the clinician isn't blocked
           toast.warning("Could not update queue status, but opening consultation.");
         } else {
-          // Optimistically update local state
           setQueue((prev) =>
             prev.map((entry) =>
-              entry.id === q.id ? { ...entry, status: "In Consult" as QueueStatus } : entry,
+              entry.id === q.id
+                ? { ...entry, status: "In Consult" as QueueStatus }
+                : entry,
             ),
           );
         }
@@ -231,6 +277,7 @@ function ClinicalWorkspacePage() {
         </div>
       </div>
 
+      {/* Stats cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -264,15 +311,19 @@ function ClinicalWorkspacePage() {
 
       <Tabs defaultValue="queue">
         <TabsList>
-          <TabsTrigger value="queue"><ClipboardList className="mr-1.5 h-4 w-4" />OPD Queue</TabsTrigger>
-          <TabsTrigger value="patients"><UsersIcon className="mr-1.5 h-4 w-4" />Patients</TabsTrigger>
+          <TabsTrigger value="queue">
+            <ClipboardList className="mr-1.5 h-4 w-4" />OPD Queue
+          </TabsTrigger>
+          <TabsTrigger value="patients">
+            <UsersIcon className="mr-1.5 h-4 w-4" />Patients
+          </TabsTrigger>
         </TabsList>
 
-        {/* ── OPD Queue tab ── */}
+        {/* OPD Queue tab */}
         <TabsContent value="queue" className="mt-4 space-y-3">
           <p className="text-sm text-muted-foreground">
-            Patients waiting for or currently in consultation. Click <strong>Consult</strong> to
-            open the full clinical workspace for that patient.
+            Patients waiting for or currently in consultation. Click{" "}
+            <strong>Consult</strong> to open the full clinical workspace.
           </p>
           <Card className="overflow-hidden p-0">
             <div className="overflow-x-auto">
@@ -282,7 +333,7 @@ function ClinicalWorkspacePage() {
                 <EmptyState
                   icon={<ClipboardList className="h-6 w-6" />}
                   title="Queue is empty"
-                  description="Patients checked into OPD will appear here for consultation."
+                  description="Patients checked into OPD will appear here."
                   className="border-0"
                 />
               ) : (
@@ -315,7 +366,9 @@ function ClinicalWorkspacePage() {
                           <TableCell className="font-mono text-muted-foreground">
                             {formatWait(q.check_in_time)}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">{q.assigned_to ?? "—"}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {q.assigned_to ?? "—"}
+                          </TableCell>
                           <TableCell>
                             <Badge
                               variant="outline"
@@ -365,7 +418,7 @@ function ClinicalWorkspacePage() {
           </Card>
         </TabsContent>
 
-        {/* ── Patients tab ── */}
+        {/* Patients tab */}
         <TabsContent value="patients" className="mt-4 space-y-3">
           <div className="relative max-w-md">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -411,7 +464,9 @@ function ClinicalWorkspacePage() {
                           </Avatar>
                         </TableCell>
                         <TableCell className="font-medium">{p.full_name}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{p.national_id}</TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {p.national_id}
+                        </TableCell>
                         <TableCell>{calculateAge(p.dob)}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className="font-normal">{p.gender}</Badge>
