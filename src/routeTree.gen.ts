@@ -17,6 +17,7 @@ import { Route as PatientsRouteImport } from './routes/patients'
 import { Route as OpdQueueRouteImport } from './routes/opd-queue'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LaboratoryRouteImport } from './routes/laboratory'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as ClinicalRouteImport } from './routes/clinical'
 import { Route as BillingRouteImport } from './routes/billing'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
@@ -64,6 +65,11 @@ const LaboratoryRoute = LaboratoryRouteImport.update({
   path: '/laboratory',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ClinicalRoute = ClinicalRouteImport.update({
   id: '/clinical',
   path: '/clinical',
@@ -100,6 +106,7 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AnalyticsRoute
   '/billing': typeof BillingRoute
   '/clinical': typeof ClinicalRouteWithChildren
+  '/dashboard': typeof DashboardRoute
   '/laboratory': typeof LaboratoryRoute
   '/login': typeof LoginRoute
   '/opd-queue': typeof OpdQueueRoute
@@ -116,6 +123,7 @@ export interface FileRoutesByTo {
   '/analytics': typeof AnalyticsRoute
   '/billing': typeof BillingRoute
   '/clinical': typeof ClinicalRouteWithChildren
+  '/dashboard': typeof DashboardRoute
   '/laboratory': typeof LaboratoryRoute
   '/login': typeof LoginRoute
   '/opd-queue': typeof OpdQueueRoute
@@ -133,6 +141,7 @@ export interface FileRoutesById {
   '/analytics': typeof AnalyticsRoute
   '/billing': typeof BillingRoute
   '/clinical': typeof ClinicalRouteWithChildren
+  '/dashboard': typeof DashboardRoute
   '/laboratory': typeof LaboratoryRoute
   '/login': typeof LoginRoute
   '/opd-queue': typeof OpdQueueRoute
@@ -151,6 +160,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/billing'
     | '/clinical'
+    | '/dashboard'
     | '/laboratory'
     | '/login'
     | '/opd-queue'
@@ -167,6 +177,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/billing'
     | '/clinical'
+    | '/dashboard'
     | '/laboratory'
     | '/login'
     | '/opd-queue'
@@ -183,6 +194,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/billing'
     | '/clinical'
+    | '/dashboard'
     | '/laboratory'
     | '/login'
     | '/opd-queue'
@@ -200,6 +212,7 @@ export interface RootRouteChildren {
   AnalyticsRoute: typeof AnalyticsRoute
   BillingRoute: typeof BillingRoute
   ClinicalRoute: typeof ClinicalRouteWithChildren
+  DashboardRoute: typeof DashboardRoute
   LaboratoryRoute: typeof LaboratoryRoute
   LoginRoute: typeof LoginRoute
   OpdQueueRoute: typeof OpdQueueRoute
@@ -268,6 +281,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LaboratoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/clinical': {
       id: '/clinical'
       path: '/clinical'
@@ -296,19 +316,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/clinical/$patientId': {
-      id: '/clinical/$patientId'
-      path: '/$patientId'
-      fullPath: '/clinical/$patientId'
-      preLoaderRoute: typeof ClinicalPatientIdRouteImport
-      parentRoute: typeof ClinicalRoute
-    }
     '/patients/$patientId': {
       id: '/patients/$patientId'
       path: '/$patientId'
       fullPath: '/patients/$patientId'
       preLoaderRoute: typeof PatientsPatientIdRouteImport
       parentRoute: typeof PatientsRoute
+    }
+    '/clinical/$patientId': {
+      id: '/clinical/$patientId'
+      path: '/$patientId'
+      fullPath: '/clinical/$patientId'
+      preLoaderRoute: typeof ClinicalPatientIdRouteImport
+      parentRoute: typeof ClinicalRoute
     }
   }
 }
@@ -342,6 +362,7 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyticsRoute: AnalyticsRoute,
   BillingRoute: BillingRoute,
   ClinicalRoute: ClinicalRouteWithChildren,
+  DashboardRoute: DashboardRoute,
   LaboratoryRoute: LaboratoryRoute,
   LoginRoute: LoginRoute,
   OpdQueueRoute: OpdQueueRoute,
@@ -354,3 +375,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
