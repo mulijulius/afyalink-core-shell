@@ -55,13 +55,16 @@ const Ctx = createContext<AuthCtx | null>(null);
 
 export const ALLOWED_ROUTES: Record<Role, string[]> = {
   // ↓ "/clinical" added — fixes Consult button for Clinicians
-  Clinician:        ["/", "/patients", "/opd-queue", "/clinical", "/laboratory", "/referrals", "/settings"],
-  Doctor:           ["/", "/patients", "/opd-queue", "/clinical", "/laboratory", "/referrals", "/settings"],
-  Nurse:            ["/", "/opd-queue", "/patients", "/settings"],
-  Pharmacist:       ["/", "/pharmacy", "/settings"],
-  "Lab Technician": ["/", "/laboratory", "/settings"],
-  Admin:            ["/", "/patients", "/opd-queue", "/pharmacy", "/laboratory", "/billing", "/referrals", "/analytics", "/users", "/settings"],
-  "Finance Officer":["/", "/billing", "/analytics", "/settings"],
+  // NOTE: "/" is now the public marketing landing page (see routes/index.tsx)
+  // and is reachable by everyone regardless of role. The authenticated
+  // dashboard lives at "/dashboard".
+  Clinician:        ["/dashboard", "/patients", "/opd-queue", "/clinical", "/laboratory", "/referrals", "/settings"],
+  Doctor:           ["/dashboard", "/patients", "/opd-queue", "/clinical", "/laboratory", "/referrals", "/settings"],
+  Nurse:            ["/dashboard", "/opd-queue", "/patients", "/settings"],
+  Pharmacist:       ["/dashboard", "/pharmacy", "/settings"],
+  "Lab Technician": ["/dashboard", "/laboratory", "/settings"],
+  Admin:            ["/dashboard", "/patients", "/opd-queue", "/pharmacy", "/laboratory", "/billing", "/referrals", "/analytics", "/users", "/settings"],
+  "Finance Officer":["/dashboard", "/billing", "/analytics", "/settings"],
 };
 
 function initialsFrom(name: string, email: string) {
