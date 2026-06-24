@@ -36,8 +36,26 @@ type AuthCtx = {
 
 const Ctx = createContext<AuthCtx | null>(null);
 
+// ── Route permissions per role ────────────────────────────────────
+//
+// BUG FIX (2026-06-24):
+//   Clinician was missing "/clinical" from its allowed routes.
+//   This caused isRouteAllowed() to return false for any URL that
+//   starts with "/clinical/" (e.g. /clinical/$patientId), so clicking
+//   the Consult button immediately redirected Clinicians away from the
+//   consultation workspace before it could render.
+//
+//   Clinicians perform the same consultation duties as Doctors
+//   (diagnosis, prescriptions, vitals, lab orders, referrals), so
+//   "/clinical" must be in their allowed routes.  The RLS policies on
+//   all clinical tables (diagnoses, prescriptions, vitals_observations,
+//   medical_history, clinical_summaries, referrals) already grant full
+//   INSERT/UPDATE access to both 'Clinician' and 'Doctor' roles —
+//   only the frontend guard was wrong.
+
 export const ALLOWED_ROUTES: Record<Role, string[]> = {
-  Clinician:        ["/", "/patients", "/opd-queue", "/laboratory", "/referrals", "/settings"],
+  // ↓ "/clinical" added — fixes Consult button for Clinicians
+  Clinician:        ["/", "/patients", "/opd-queue", "/clinical", "/laboratory", "/referrals", "/settings"],
   Doctor:           ["/", "/patients", "/opd-queue", "/clinical", "/laboratory", "/referrals", "/settings"],
   Nurse:            ["/", "/opd-queue", "/patients", "/settings"],
   Pharmacist:       ["/", "/pharmacy", "/settings"],
@@ -120,7 +138,11 @@ export function useAuth() {
 }
 
 export function isRouteAllowed(role: Role, pathname: string) {
+  // Special-case deep routes so a prefix match works correctly:
+  // /patients/$patientId  → check for "/patients"
+  // /clinical/$patientId  → check for "/clinical"
   if (pathname.startsWith("/patients/")) return ALLOWED_ROUTES[role].includes("/patients");
+  if (pathname.startsWith("/clinical/")) return ALLOWED_ROUTES[role].includes("/clinical");
   return ALLOWED_ROUTES[role].some(
     (r) => r === pathname || (r !== "/" && pathname.startsWith(r + "/")),
   );
