@@ -1,14 +1,11 @@
 /**
  * useClinicalStaff
  *
- * Returns all approved Doctor and Clinician profiles from Supabase
- * so that any portal (Admin, Nurse, Doctor, Clinician) can populate
- * the "Assigned Doctor / Clinician" select without hardcoded names.
- *
- * Relies on:
- *   • The RLS policies added in migration 20260623000000_doctors_lookup.sql
- *     that allow authenticated users to SELECT profiles where the user
- *     has a Doctor or Clinician role.
+ * Returns all approved Doctor and Clinician profiles via the
+ * get_clinical_staff() Supabase RPC function (SECURITY DEFINER),
+ * which bypasses RLS entirely and avoids the infinite-recursion
+ * error that a direct .from("profiles").select(...).in("user_roles.role")
+ * join caused on the profiles table policies.
  */
 
 import { useEffect, useState } from "react";
@@ -38,41 +35,23 @@ export function useClinicalStaff(): UseClinicalStaffResult {
       setLoading(true);
       setError(null);
 
-      // Join profiles + user_roles to get approved Doctor / Clinician users.
-      // The migration 20260623000000_doctors_lookup.sql adds the RLS policies
-      // that allow this query for any authenticated user.
-      const { data, error: qErr } = await supabase
-        .from("profiles")
-        .select(
-          "id, full_name, user_roles!inner(role)",
-        )
-        .eq("status", "approved")
-        .in("user_roles.role", ["Doctor", "Clinician"])
-        .order("full_name");
+      // Call the SECURITY DEFINER RPC function — safe, no RLS loop.
+      const { data, error: rpcErr } = await supabase.rpc("get_clinical_staff");
 
       if (cancelled) return;
 
-      if (qErr) {
-        console.error("useClinicalStaff: failed to fetch staff", qErr.message);
-        setError(qErr.message);
+      if (rpcErr) {
+        console.error("useClinicalStaff: RPC failed", rpcErr.message);
+        setError(rpcErr.message);
         setStaff([]);
       } else {
-        const mapped: ClinicalStaffMember[] = (data ?? []).map((row: {
-          id: string;
-          full_name: string;
-          user_roles: { role: string }[] | { role: string };
-        }) => {
-          // user_roles comes back as array when using !inner
-          const rolesArr = Array.isArray(row.user_roles)
-            ? row.user_roles
-            : [row.user_roles];
-          const role = rolesArr[0]?.role as "Doctor" | "Clinician";
-          return {
+        const mapped: ClinicalStaffMember[] = (data ?? []).map(
+          (row: { id: string; full_name: string; role: string }) => ({
             id: row.id,
             full_name: row.full_name,
-            role,
-          };
-        });
+            role: row.role as "Doctor" | "Clinician",
+          }),
+        );
         setStaff(mapped);
       }
 
@@ -80,7 +59,9 @@ export function useClinicalStaff(): UseClinicalStaffResult {
     };
 
     fetchStaff();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return { staff, loading, error };
