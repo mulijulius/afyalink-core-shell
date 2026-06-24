@@ -1,3 +1,5 @@
+// ── Triage types & metadata ──────────────────────────────────────
+
 export type Triage = "Red" | "Orange" | "Yellow" | "Green" | "Blue";
 
 export type QueueEntry = {
@@ -42,19 +44,7 @@ export const TRIAGE_META: Record<
 
 export const TRIAGE_ORDER: Triage[] = ["Red", "Orange", "Yellow", "Green", "Blue"];
 
-// Build relative ISO times so wait-times look live
-const minsAgo = (m: number) =>
-  new Date(Date.now() - m * 60_000).toISOString();
-
-export const initialQueue: QueueEntry[] = [
-  { queueNo: "A012", patientName: "Wanjiku Kamau",  checkInTime: minsAgo(38), triage: "Yellow", doctor: "Dr. Mwangi",   status: "In Consult" },
-  { queueNo: "A013", patientName: "Brian Otieno",   checkInTime: minsAgo(32), triage: "Red",    doctor: "Dr. Achieng",  status: "In Consult" },
-  { queueNo: "A014", patientName: "Aisha Mohamed",  checkInTime: minsAgo(28), triage: "Green",  doctor: "Dr. Karanja",  status: "Waiting" },
-  { queueNo: "A015", patientName: "Joseph Kiprono", checkInTime: minsAgo(22), triage: "Orange", doctor: "Dr. Mwangi",   status: "Waiting" },
-  { queueNo: "A016", patientName: "Faith Achieng",  checkInTime: minsAgo(18), triage: "Yellow", doctor: "Dr. Achieng",  status: "Triaged" },
-  { queueNo: "A017", patientName: "Samuel Njoroge", checkInTime: minsAgo(13), triage: "Green",  doctor: "Dr. Karanja",  status: "Waiting" },
-  { queueNo: "A018", patientName: "Mercy Wairimu",  checkInTime: minsAgo(9),  triage: "Green",  doctor: "Dr. Mwangi",   status: "Waiting" },
-  { queueNo: "A019", patientName: "David Mutua",    checkInTime: minsAgo(4),  triage: "Orange", doctor: "Dr. Achieng",  status: "Waiting" },
-];
-
-export const DOCTORS = ["Dr. Mwangi", "Dr. Achieng", "Dr. Karanja", "Dr. Wambui"];
+// NOTE: The DOCTORS constant has been intentionally removed.
+// The "Assigned Doctor" dropdown in CheckInDialog and other portals
+// now fetches live Doctor/Clinician profiles directly from Supabase
+// via the useClinicalStaff() hook in src/hooks/useClinicalStaff.ts.
