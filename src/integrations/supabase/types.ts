@@ -168,6 +168,7 @@ export type Database = {
           check_in_time: string
           triage: Database["public"]["Enums"]["triage_level"]
           assigned_to: string | null
+          assigned_to_id: string | null
           status: Database["public"]["Enums"]["queue_status"]
           checked_in_by: string | null
           updated_at: string
@@ -180,6 +181,7 @@ export type Database = {
           check_in_time?: string
           triage?: Database["public"]["Enums"]["triage_level"]
           assigned_to?: string | null
+          assigned_to_id?: string | null
           status?: Database["public"]["Enums"]["queue_status"]
           checked_in_by?: string | null
           updated_at?: string
@@ -189,10 +191,18 @@ export type Database = {
           patient_name?: string
           triage?: Database["public"]["Enums"]["triage_level"]
           assigned_to?: string | null
+          assigned_to_id?: string | null
           status?: Database["public"]["Enums"]["queue_status"]
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "opd_queue_assigned_to_id_fkey"
+            columns: ["assigned_to_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       lab_orders: {
         Row: {
@@ -625,6 +635,14 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      get_clinical_staff: {
+        Args: Record<PropertyKey, never>
+        Returns: Array<{
+          id: string
+          full_name: string
+          role: Database["public"]["Enums"]["app_role"]
+        }>
       }
     }
     Enums: {
