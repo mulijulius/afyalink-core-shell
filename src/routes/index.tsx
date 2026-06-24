@@ -1,1295 +1,488 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import {
-  LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-} from "recharts";
-import {
-  Users, ListOrdered, BedDouble, AlertTriangle,
-  FlaskConical, Pill, Receipt, Share2, Clock,
-  CheckCircle2, Building2, Phone, Mail, Shield, Activity,
+  Users,
+  ListOrdered,
+  FlaskConical,
+  Pill,
+  Receipt,
+  Share2,
+  ShieldCheck,
+  Activity,
+  Stethoscope,
+  ChevronLeft,
+  ChevronRight,
+  MapPin,
+  Phone,
+  Mail,
+  Menu,
+  X,
   type LucideIcon,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table, TableBody, TableCell, TableHead,
-  TableHeader, TableRow,
-} from "@/components/ui/table";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Separator } from "@/components/ui/separator";
-import { useAuth } from "@/lib/auth";
-import { supabase } from "@/integrations/supabase/client";
-import type { Database } from "@/integrations/supabase/types";
-import { TableSkeleton } from "@/components/TableSkeleton";
-import { EmptyState } from "@/components/EmptyState";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Dashboard · AfyaLink HMS" },
-      { name: "description", content: "Clinical dashboard for Kapsabet Referral Hospital." },
+      { title: "AfyaLink HMS — Kapsabet County Referral Hospital" },
+      {
+        name: "description",
+        content:
+          "AfyaLink HMS is the digital hospital management system for Kapsabet County Referral Hospital — patients, OPD, pharmacy, lab, billing and referrals in one secure platform.",
+      },
     ],
   }),
-  component: Dashboard,
+  component: LandingPage,
 });
 
-type Triage = Database["public"]["Enums"]["triage_level"];
-type LabPriority = Database["public"]["Enums"]["lab_priority"];
-type LabOrderStatus = Database["public"]["Enums"]["lab_order_status"];
+// ── Hero background slideshow ───────────────────────────────────────
+// Images live in /public/landing (copied from the project's Imagery folder).
+// Each slide is shown for SLIDE_DURATION_MS before crossfading to the next,
+// looping continuously. SLIDE_DURATION_MS is well above the 800ms minimum.
+const SLIDES: { src: string; alt: string }[] = [
+  { src: "/landing/hospital-facade-01.jpg", alt: "Kapsabet County Referral Hospital main entrance" },
+  { src: "/landing/waiting-area.jpg", alt: "Patient waiting area at the hospital" },
+  { src: "/landing/radiology-room.jpg", alt: "Radiology imaging room" },
+  { src: "/landing/mri-suite.jpeg", alt: "MRI imaging suite" },
+  { src: "/landing/ward-bed.jpg", alt: "Inpatient ward bed" },
+  { src: "/landing/mobile-clinic.webp", alt: "Beyond Zero mobile clinic outreach unit" },
+  { src: "/landing/patient-care.jpeg", alt: "Nurse attending to a patient" },
+  { src: "/landing/new-block-construction.jpeg", alt: "New hospital block under construction" },
+  { src: "/landing/hospital-facade-03.webp", alt: "Hospital grounds and parking area" },
+  { src: "/landing/hospital-facade-02.jpg", alt: "Hospital staff outside the main building" },
+];
 
-const STATUS_CLASS: Record<string, string> = {
-  "In Consult":       "bg-primary/10 text-primary border-primary/20",
-  Dispensing:         "bg-accent/10 text-accent border-accent/30",
-  "Awaiting Results": "bg-amber-500/10 text-amber-700 border-amber-500/30",
-  Waiting:            "bg-muted text-muted-foreground border-border",
-  Triaged:            "bg-muted text-muted-foreground border-border",
-  Admitted:           "bg-accent/10 text-accent border-accent/30",
-  Done:               "bg-emerald-500/10 text-emerald-700 border-emerald-500/30",
-  "Did Not Wait":     "bg-muted text-muted-foreground border-border",
-};
+const SLIDE_DURATION_MS = 4000;
 
-const fmtTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function HeroSlideshow() {
+  const [index, setIndex] = useState(0);
 
-const fmtWait = (iso: string) => {
-  const mins = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
-  if (mins < 60) return `${mins}m`;
-  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-};
+  useEffect(() => {
+    const id = setInterval(() => {
+      setIndex((i) => (i + 1) % SLIDES.length);
+    }, SLIDE_DURATION_MS);
+    return () => clearInterval(id);
+  }, []);
 
-const startOfToday = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-};
+  const goTo = (i: number) => setIndex(((i % SLIDES.length) + SLIDES.length) % SLIDES.length);
 
-const lastNDays = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - (n - 1));
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
-
-// ── Shared components ───────────────────────────────────────────
-
-type Stat = { label: string; value: string; hint?: string; icon: LucideIcon; tone?: "primary" | "accent" | "warning" };
-
-function StatCard({ s }: { s: Stat }) {
-  const cls =
-    s.tone === "warning" ? "bg-destructive/10 text-destructive"
-    : s.tone === "accent" ? "bg-accent/10 text-accent"
-    : "bg-primary/10 text-primary";
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">{s.label}</CardTitle>
-        <div className={`flex h-8 w-8 items-center justify-center rounded-md ${cls}`}>
-          <s.icon className="h-4 w-4" />
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-semibold tracking-tight">{s.value}</div>
-        {s.hint && <p className="mt-1 text-xs text-muted-foreground">{s.hint}</p>}
-      </CardContent>
-    </Card>
+    <div className="absolute inset-0 overflow-hidden bg-slate-900">
+      {SLIDES.map((slide, i) => (
+        <img
+          key={slide.src}
+          src={slide.src}
+          alt={slide.alt}
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ease-in-out ${
+            i === index ? "opacity-100" : "opacity-0"
+          }`}
+          style={{
+            animation: i === index ? "afyalink-slow-pan 9s ease-in-out forwards" : undefined,
+          }}
+          loading={i === 0 ? "eager" : "lazy"}
+        />
+      ))}
+      {/* Dark gradient overlay so hero text stays readable over any photo */}
+      <div className="absolute inset-0 bg-gradient-to-b from-[#0a1f33]/80 via-[#0a1f33]/60 to-[#0a1f33]/90" />
+
+      {/* Prev / next controls */}
+      <button
+        type="button"
+        aria-label="Previous slide"
+        onClick={() => goTo(index - 1)}
+        className="absolute left-3 top-1/2 z-10 hidden -translate-y-1/2 rounded-full border border-white/30 bg-white/10 p-2 text-white backdrop-blur-sm transition hover:bg-white/20 sm:flex"
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </button>
+      <button
+        type="button"
+        aria-label="Next slide"
+        onClick={() => goTo(index + 1)}
+        className="absolute right-3 top-1/2 z-10 hidden -translate-y-1/2 rounded-full border border-white/30 bg-white/10 p-2 text-white backdrop-blur-sm transition hover:bg-white/20 sm:flex"
+      >
+        <ChevronRight className="h-5 w-5" />
+      </button>
+
+      {/* Slide indicator dots */}
+      <div className="absolute bottom-5 left-1/2 z-10 flex -translate-x-1/2 gap-1.5">
+        {SLIDES.map((_, i) => (
+          <button
+            key={i}
+            type="button"
+            aria-label={`Go to slide ${i + 1}`}
+            onClick={() => goTo(i)}
+            className={`h-1.5 rounded-full transition-all ${
+              i === index ? "w-6 bg-white" : "w-1.5 bg-white/40 hover:bg-white/70"
+            }`}
+          />
+        ))}
+      </div>
+
+      <style>{`
+        @keyframes afyalink-slow-pan {
+          0%   { transform: scale(1.02) translate(0, 0); }
+          100% { transform: scale(1.1) translate(-1%, -1%); }
+        }
+      `}</style>
+    </div>
   );
 }
 
-/** User identity card shown on every dashboard below the header */
-function UserCredentialCard({ name, role, email, department, facility, phone, initials }: {
-  name: string; role: string | null; email: string;
-  department: string | null; facility: string; phone: string | null; initials: string;
-}) {
+// ── Navbar ───────────────────────────────────────────────────────────
+
+const NAV_LINKS = [
+  { label: "Home", href: "#home" },
+  { label: "Modules", href: "#modules" },
+  { label: "About", href: "#about" },
+  { label: "Contact", href: "#contact" },
+];
+
+function Navbar() {
+  const [open, setOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
-    <Card className="border-primary/20 bg-primary/5">
-      <CardContent className="py-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <Avatar className="h-14 w-14 shrink-0">
-            <AvatarFallback className="bg-primary text-primary-foreground text-lg font-bold">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <p className="text-base font-semibold truncate">{name}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <Badge className="bg-primary/20 text-primary border-primary/30 hover:bg-primary/20">
-                <Shield className="mr-1 h-3 w-3" />{role ?? "Pending"}
-              </Badge>
-              {department && (
-                <Badge variant="outline" className="text-xs">
-                  <Building2 className="mr-1 h-3 w-3" />{department}
-                </Badge>
-              )}
+    <header
+      className={`fixed inset-x-0 top-0 z-50 transition-colors duration-300 ${
+        scrolled ? "bg-[#0057A8] shadow-md" : "bg-transparent"
+      }`}
+    >
+      <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+        <a href="#home" className="flex items-center gap-2">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[#0057A8] font-bold shadow-sm">
+            A
+          </div>
+          <span className="text-base font-semibold text-white sm:text-lg">
+            AfyaLink HMS <span aria-label="Kenya">🇰🇪</span>
+          </span>
+        </a>
+
+        <div className="hidden items-center gap-8 md:flex">
+          {NAV_LINKS.map((l) => (
+            <a
+              key={l.href}
+              href={l.href}
+              className="text-sm font-medium text-white/90 transition-colors hover:text-white"
+            >
+              {l.label}
+            </a>
+          ))}
+        </div>
+
+        <div className="hidden items-center gap-3 md:flex">
+          <Button asChild className="bg-white text-[#0057A8] hover:bg-white/90">
+            <Link to="/login">Staff Login</Link>
+          </Button>
+        </div>
+
+        <button
+          type="button"
+          className="text-white md:hidden"
+          aria-label="Toggle menu"
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+        </button>
+      </nav>
+
+      {open && (
+        <div className="border-t border-white/10 bg-[#0057A8] px-4 pb-4 pt-2 md:hidden">
+          <div className="flex flex-col gap-3">
+            {NAV_LINKS.map((l) => (
+              <a
+                key={l.href}
+                href={l.href}
+                onClick={() => setOpen(false)}
+                className="text-sm font-medium text-white/90 hover:text-white"
+              >
+                {l.label}
+              </a>
+            ))}
+            <Button asChild className="mt-1 w-full bg-white text-[#0057A8] hover:bg-white/90">
+              <Link to="/login">Staff Login</Link>
+            </Button>
+          </div>
+        </div>
+      )}
+    </header>
+  );
+}
+
+// ── Hero ─────────────────────────────────────────────────────────────
+
+function Hero() {
+  return (
+    <section id="home" className="relative flex min-h-[640px] items-center overflow-hidden pt-16 sm:min-h-[720px]">
+      <HeroSlideshow />
+      <div className="relative z-10 mx-auto w-full max-w-7xl px-4 py-24 text-center sm:px-6 lg:px-8">
+        <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-4 py-1.5 text-xs font-medium text-white backdrop-blur-sm sm:text-sm">
+          <ShieldCheck className="h-4 w-4" /> Kapsabet County Referral Hospital · Level 5
+        </p>
+        <h1 className="mx-auto max-w-3xl text-4xl font-bold tracking-tight text-white sm:text-5xl md:text-6xl">
+          Hospital care,<br className="hidden sm:block" /> connected digitally
+        </h1>
+        <p className="mx-auto mt-5 max-w-xl text-base text-white/90 sm:text-lg">
+          AfyaLink HMS brings patient records, OPD queueing, pharmacy, laboratory,
+          billing and referrals into one secure system — built for Kapsabet
+          County Referral Hospital staff.
+        </p>
+        <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <Button
+            asChild
+            size="lg"
+            className="w-full bg-[#0057A8] text-white hover:bg-[#004a8f] sm:w-auto"
+          >
+            <Link to="/login">Staff Login</Link>
+          </Button>
+          <Button
+            asChild
+            size="lg"
+            variant="outline"
+            className="w-full border-white bg-white/10 text-white backdrop-blur-sm hover:bg-white hover:text-[#0057A8] sm:w-auto"
+          >
+            <a href="#modules">Explore the System</a>
+          </Button>
+        </div>
+        <p className="mt-6 text-xs text-white/70">
+          New staff account?{" "}
+          <Link to="/login" className="font-medium text-white underline-offset-2 hover:underline">
+            Request access
+          </Link>{" "}
+          — subject to Admin approval.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+// ── Modules / features section ────────────────────────────────────────
+
+type Feature = { title: string; description: string; icon: LucideIcon };
+
+const FEATURES: Feature[] = [
+  {
+    title: "Patient Records",
+    description: "Centralized patient profiles, visit history and clinical summaries available the moment a patient checks in.",
+    icon: Users,
+  },
+  {
+    title: "OPD Queueing",
+    description: "Real-time triage and queue tracking so nurses, clinicians and doctors always know who's next.",
+    icon: ListOrdered,
+  },
+  {
+    title: "Laboratory",
+    description: "Lab orders and results flow directly between technicians and clinicians — no paper, no delays.",
+    icon: FlaskConical,
+  },
+  {
+    title: "Pharmacy",
+    description: "Live drug stock, dispensing and low-stock alerts keep the pharmacy counter running smoothly.",
+    icon: Pill,
+  },
+  {
+    title: "Billing & NHIF",
+    description: "Transparent billing with NHIF claim tracking, built for Kenya's facility workflows.",
+    icon: Receipt,
+  },
+  {
+    title: "Referrals",
+    description: "Track referrals in and out of the facility, including inter-hospital coordination.",
+    icon: Share2,
+  },
+];
+
+function Modules() {
+  return (
+    <section id="modules" className="bg-white py-20 sm:py-28">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-2xl text-center">
+          <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+            One system, every department
+          </h2>
+          <p className="mt-4 text-muted-foreground">
+            AfyaLink HMS gives every role — from reception to the lab to
+            finance — a dashboard built specifically for their workflow, all
+            backed by the same secure patient record.
+          </p>
+        </div>
+
+        <div className="mt-14 grid grid-cols-1 gap-x-8 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
+          {FEATURES.map((f) => (
+            <div key={f.title} className="flex flex-col items-center text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#0057A8] text-white shadow-lg shadow-[#0057A8]/20">
+                <f.icon className="h-7 w-7" />
+              </div>
+              <h3 className="mt-5 text-base font-semibold text-foreground">{f.title}</h3>
+              <p className="mt-2 max-w-xs text-sm text-muted-foreground">{f.description}</p>
             </div>
-            <Separator className="my-2" />
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1"><Mail className="h-3 w-3" />{email}</span>
-              {phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{phone}</span>}
-              <span className="flex items-center gap-1"><Building2 className="h-3 w-3" />{facility}</span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── About section ──────────────────────────────────────────────────
+
+const STATS = [
+  { label: "Clinical roles supported", value: "7" },
+  { label: "Core hospital modules", value: "10+" },
+  { label: "Built for", value: "Kapsabet CRH" },
+  { label: "Role-based access", value: "100%" },
+];
+
+function About() {
+  return (
+    <section id="about" className="bg-slate-50 py-20 sm:py-28">
+      <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:px-8">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-[#0057A8]">About the system</p>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+            Built for Kapsabet County Referral Hospital
+          </h2>
+          <p className="mt-5 text-muted-foreground">
+            AfyaLink HMS replaces scattered paper trails and spreadsheets with
+            a single, role-aware system. Every account is approved by a
+            facility Admin, and every module — from the OPD queue to NHIF
+            claims — runs on live data so staff are always working from the
+            same source of truth.
+          </p>
+          <p className="mt-4 text-muted-foreground">
+            The platform follows the Ministry of Health's facility colour
+            standards and is designed to scale to other county referral
+            hospitals across Kenya.
+          </p>
+
+          <div className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-4">
+            {STATS.map((s) => (
+              <div key={s.label}>
+                <p className="text-2xl font-bold text-[#0057A8]">{s.value}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative">
+          <div className="overflow-hidden rounded-2xl shadow-xl">
+            <img
+              src="/landing/hospital-services-sign.webp"
+              alt="County referral hospital services signage"
+              className="h-80 w-full object-cover sm:h-[420px]"
+              loading="lazy"
+            />
+          </div>
+          <div className="absolute -bottom-6 -left-6 hidden items-center gap-3 rounded-xl bg-white p-4 shadow-lg sm:flex">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00A651]/10 text-[#00A651]">
+              <Activity className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Live clinical data</p>
+              <p className="text-xs text-muted-foreground">Powered by Supabase</p>
             </div>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
-const tooltipStyle = {
-  background: "var(--color-card)",
-  border: "1px solid var(--color-border)",
-  borderRadius: 8,
-  fontSize: 12,
-};
+// ── CTA banner ───────────────────────────────────────────────────────
 
-// ── Shared data hooks ────────────────────────────────────────────
-
-/** 7-day visit trend, derived from real `visits` rows. */
-function useWeekVisits() {
-  const [data, setData] = useState<{ day: string; visits: number }[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const run = async () => {
-      const since = lastNDays(7);
-      const { data: rows, error } = await supabase
-        .from("visits")
-        .select("visit_date")
-        .gte("visit_date", since.toISOString().split("T")[0]);
-      if (error) {
-        console.error("Failed to load weekly visits:", error);
-        setData([]);
-        setLoading(false);
-        return;
-      }
-      const buckets: { day: string; visits: number }[] = [];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const key = d.toISOString().split("T")[0];
-        const label = d.toLocaleDateString([], { weekday: "short" });
-        const count = (rows ?? []).filter((r) => r.visit_date === key).length;
-        buckets.push({ day: label, visits: count });
-      }
-      setData(buckets);
-      setLoading(false);
-    };
-    run();
-  }, []);
-
-  return { data, loading };
-}
-
-/** Top diagnoses this month, derived from `visits.diagnosis`. */
-function useTopDiagnoses(limit = 5) {
-  const [data, setData] = useState<{ name: string; cases: number }[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const run = async () => {
-      const monthStart = new Date();
-      monthStart.setDate(1);
-      monthStart.setHours(0, 0, 0, 0);
-      const { data: rows, error } = await supabase
-        .from("visits")
-        .select("diagnosis")
-        .gte("visit_date", monthStart.toISOString().split("T")[0])
-        .not("diagnosis", "is", null);
-      if (error) {
-        console.error("Failed to load diagnoses:", error);
-        setData([]);
-        setLoading(false);
-        return;
-      }
-      const counts = new Map<string, number>();
-      for (const r of rows ?? []) {
-        const dx = (r.diagnosis ?? "").trim();
-        if (!dx) continue;
-        counts.set(dx, (counts.get(dx) ?? 0) + 1);
-      }
-      const sorted = Array.from(counts.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, limit)
-        .map(([name, cases]) => ({ name, cases }));
-      setData(sorted);
-      setLoading(false);
-    };
-    run();
-  }, [limit]);
-
-  return { data, loading };
-}
-
-function useLowStock(limit = 4) {
-  const [items, setItems] = useState<Array<{ name: string; qty: number; unit: string }>>([]);
-  const [loading, setLoading] = useState(true);
-
-  const refetch = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("pharmacy_drugs")
-      .select("name, stock, unit, reorder_level");
-    if (error) {
-      console.error("Failed to load pharmacy stock:", error);
-      setItems([]);
-      setLoading(false);
-      return;
-    }
-    const low = (data ?? [])
-      .filter((d) => d.stock < d.reorder_level)
-      .map((d) => ({ name: d.name, qty: d.stock, unit: d.unit }))
-      .slice(0, limit);
-    setItems(low);
-    setLoading(false);
-  }, [limit]);
-
-  useEffect(() => { refetch(); }, [refetch]);
-
-  return { items, loading };
-}
-
-// ── Role dashboards ────────────────────────────────────────────
-
-function AdminDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const { items: lowStockItems, loading: stockLoading } = useLowStock(4);
-  const { data: weekVisits, loading: visitsLoading } = useWeekVisits();
-  const { data: diagnoses, loading: dxLoading } = useTopDiagnoses(5);
-
-  const [patientsToday, setPatientsToday] = useState<number | null>(null);
-  const [queueWaiting, setQueueWaiting] = useState<number | null>(null);
-  const [recentPatients, setRecentPatients] = useState<
-    Array<{ id: string; name: string; nationalId: string; time: string; dept: string; status: string }>
-  >([]);
-  const [recentLoading, setRecentLoading] = useState(true);
-
-  useEffect(() => {
-    const run = async () => {
-      const since = startOfToday();
-
-      const [{ count: visitCount }, { count: waitingCount }, { data: queueRows, error: queueError }] =
-        await Promise.all([
-          supabase.from("visits").select("id", { count: "exact", head: true }).gte("created_at", since),
-          supabase.from("opd_queue").select("id", { count: "exact", head: true }).eq("status", "Waiting"),
-          supabase
-            .from("opd_queue")
-            .select("id, patient_name, check_in_time, status")
-            .order("check_in_time", { ascending: false })
-            .limit(5),
-        ]);
-
-      setPatientsToday(visitCount ?? 0);
-      setQueueWaiting(waitingCount ?? 0);
-
-      if (queueError) {
-        console.error("Failed to load recent patients:", queueError);
-        setRecentPatients([]);
-      } else {
-        setRecentPatients(
-          (queueRows ?? []).map((q) => ({
-            id: q.id,
-            name: q.patient_name,
-            nationalId: "—",
-            time: fmtTime(q.check_in_time),
-            dept: "OPD",
-            status: q.status,
-          })),
-        );
-      }
-      setRecentLoading(false);
-    };
-    run();
-  }, []);
-
-  const stats: Stat[] = [
-    { label: "Patients Today",          value: patientsToday === null ? "—" : String(patientsToday), icon: Users,         tone: "primary" },
-    { label: "Currently Waiting (OPD)", value: queueWaiting === null ? "—" : String(queueWaiting),    icon: ListOrdered,   tone: "primary" },
-    { label: "Beds Occupied",           value: "Not tracked", hint: "No bed/inpatient table yet", icon: BedDouble, tone: "accent" },
-    { label: "Drug Stock Alerts",       value: String(lowStockItems.length), icon: AlertTriangle, tone: "warning" },
-  ];
-
+function CtaBanner() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Welcome back, {name}. Here's today's facility snapshot.</p>
-      </div>
-      <UserCredentialCard name={name} role="Admin" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Patient Visits This Week</CardTitle></CardHeader>
-          <CardContent className="h-72">
-            {visitsLoading ? (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading…</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={weekVisits} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="day" stroke="var(--color-muted-foreground)" fontSize={12} />
-                  <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Line type="monotone" dataKey="visits" stroke="var(--color-primary)" strokeWidth={2.5}
-                    dot={{ r: 4, fill: "var(--color-primary)" }} activeDot={{ r: 6 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-base">Top Diagnoses This Month</CardTitle></CardHeader>
-          <CardContent className="h-72">
-            {dxLoading ? (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading…</div>
-            ) : diagnoses.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">No diagnoses recorded this month yet.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={diagnoses} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                  <XAxis dataKey="name" stroke="var(--color-muted-foreground)" fontSize={12} />
-                  <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="cases" fill="var(--color-accent)" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader><CardTitle className="text-base">Recent Patients</CardTitle></CardHeader>
-          <CardContent>
-            {recentLoading ? (
-              <TableSkeleton cols={5} rows={5} />
-            ) : recentPatients.length === 0 ? (
-              <EmptyState icon={<Users className="h-6 w-6" />} title="No recent patients" description="Patients checked into the OPD queue will appear here." className="border-0" />
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead><TableHead>Time</TableHead>
-                      <TableHead>Department</TableHead><TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {recentPatients.map((p) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="font-medium">{p.name}</TableCell>
-                        <TableCell className="text-muted-foreground">{p.time}</TableCell>
-                        <TableCell>{p.dept}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={STATUS_CLASS[p.status] ?? ""}>{p.status}</Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Low Stock Alerts</CardTitle>
-            <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{lowStockItems.length} items</Badge>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {stockLoading ? (
-              <TableSkeleton cols={2} rows={4} />
-            ) : lowStockItems.length === 0 ? (
-              <EmptyState icon={<AlertTriangle className="h-6 w-6" />} title="No low stock items" className="border-0" />
-            ) : (
-              lowStockItems.map((d) => (
-                <div key={d.name} className="flex items-start justify-between gap-3 rounded-md border bg-card p-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{d.name}</p>
-                    <p className="text-xs text-muted-foreground">{d.qty} {d.unit} remaining</p>
-                  </div>
-                  <Badge variant="outline" className="shrink-0 border-destructive/30 bg-destructive/10 text-destructive">
-                    <AlertTriangle className="mr-1 h-3 w-3" />Low
-                  </Badge>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function ClinicianDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const [queue, setQueue] = useState<
-    Array<{ queueNo: string; patient: string; triage: Triage; wait: string; status: string }>
-  >([]);
-  const [criticalResults, setCriticalResults] = useState<
-    Array<{ patient: string; test: string; result: string }>
-  >([]);
-  const [referralsSent, setReferralsSent] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const run = async () => {
-      const since = startOfToday();
-      const [{ data: queueRows, error: queueError }, { data: critRows, error: critError }, { count: refCount }] =
-        await Promise.all([
-          supabase
-            .from("opd_queue")
-            .select("queue_no, patient_name, check_in_time, triage, status")
-            .neq("status", "Done")
-            .order("check_in_time", { ascending: true })
-            .limit(5),
-          supabase
-            .from("lab_results")
-            .select("test_name, result, lab_orders(patient_name)")
-            .eq("is_critical", true)
-            .order("created_at", { ascending: false })
-            .limit(5),
-          supabase.from("referrals").select("id", { count: "exact", head: true }).gte("created_at", since),
-        ]);
-
-      if (queueError) {
-        console.error("Failed to load queue:", queueError);
-        setQueue([]);
-      } else {
-        setQueue(
-          (queueRows ?? []).map((q) => ({
-            queueNo: q.queue_no,
-            patient: q.patient_name,
-            triage: q.triage,
-            wait: fmtWait(q.check_in_time),
-            status: q.status,
-          })),
-        );
-      }
-
-      if (critError) {
-        console.error("Failed to load critical results:", critError);
-        setCriticalResults([]);
-      } else {
-        type CritJoinRow = { test_name: string; result: string; lab_orders: { patient_name: string } | null };
-        const rows = (critRows ?? []) as unknown as CritJoinRow[];
-        setCriticalResults(
-          rows.map((r) => ({
-            patient: r.lab_orders?.patient_name ?? "—",
-            test: r.test_name,
-            result: r.result,
-          })),
-        );
-      }
-
-      setReferralsSent(refCount ?? 0);
-      setLoading(false);
-    };
-    run();
-  }, []);
-
-  const stats: Stat[] = [
-    { label: "My Queue Today",      value: String(queue.length),            icon: ListOrdered,   tone: "primary" },
-    { label: "Critical Lab Results",value: String(criticalResults.length),  icon: FlaskConical,  tone: "warning" },
-    { label: "Referrals Sent",      value: referralsSent === null ? "—" : String(referralsSent), icon: Share2, tone: "primary" },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Good morning, {name}. Your clinical workload for today.</p>
-      </div>
-      <UserCredentialCard name={name} role="Clinician" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">My OPD Queue</CardTitle></CardHeader>
-          <CardContent>
-            {loading ? (
-              <TableSkeleton cols={5} rows={3} />
-            ) : queue.length === 0 ? (
-              <EmptyState icon={<ListOrdered className="h-6 w-6" />} title="Queue is empty" className="border-0" />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow><TableHead>Queue #</TableHead><TableHead>Patient</TableHead><TableHead>Triage</TableHead><TableHead>Wait</TableHead><TableHead>Status</TableHead></TableRow>
-                </TableHeader>
-                <TableBody>
-                  {queue.map((q) => (
-                    <TableRow key={q.queueNo}>
-                      <TableCell className="font-mono text-xs">{q.queueNo}</TableCell>
-                      <TableCell className="font-medium">{q.patient}</TableCell>
-                      <TableCell><Badge variant="outline">{q.triage}</Badge></TableCell>
-                      <TableCell className="text-muted-foreground">{q.wait}</TableCell>
-                      <TableCell><Badge variant="outline" className={STATUS_CLASS[q.status] ?? ""}>{q.status}</Badge></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              Critical Lab Results
-              <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{criticalResults.length} critical</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {loading ? (
-              <TableSkeleton cols={1} rows={3} />
-            ) : criticalResults.length === 0 ? (
-              <EmptyState icon={<FlaskConical className="h-6 w-6" />} title="No critical results" className="border-0" />
-            ) : (
-              criticalResults.map((r) => (
-                <div key={r.patient + r.test} className="rounded-md border border-destructive/20 bg-destructive/5 p-3">
-                  <p className="text-sm font-medium">{r.patient}</p>
-                  <p className="text-xs text-muted-foreground">{r.test}: <span className="font-semibold text-destructive">{r.result}</span></p>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function NurseDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const [queue, setQueue] = useState<
-    Array<{ queueNo: string; patient: string; triage: Triage; wait: string; status: string }>
-  >([]);
-  const [redCount, setRedCount] = useState<number | null>(null);
-  const [triagedToday, setTriagedToday] = useState<number | null>(null);
-  const [checkInsToday, setCheckInsToday] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const run = async () => {
-      const since = startOfToday();
-      const [{ data: queueRows, error: queueError }, { count: checkIns }, { data: triagedRows }] =
-        await Promise.all([
-          supabase
-            .from("opd_queue")
-            .select("queue_no, patient_name, check_in_time, triage, status")
-            .neq("status", "Done")
-            .order("check_in_time", { ascending: true }),
-          supabase.from("opd_queue").select("id", { count: "exact", head: true }).gte("check_in_time", since),
-          supabase.from("opd_queue").select("triage, status").gte("check_in_time", since),
-        ]);
-
-      if (queueError) {
-        console.error("Failed to load queue:", queueError);
-        setQueue([]);
-      } else {
-        setQueue(
-          (queueRows ?? []).map((q) => ({
-            queueNo: q.queue_no,
-            patient: q.patient_name,
-            triage: q.triage,
-            wait: fmtWait(q.check_in_time),
-            status: q.status,
-          })),
-        );
-      }
-
-      setCheckInsToday(checkIns ?? 0);
-      const reds = (triagedRows ?? []).filter((r) => r.triage === "Red").length;
-      const triaged = (triagedRows ?? []).filter((r) => r.status !== "Waiting").length;
-      setRedCount(reds);
-      setTriagedToday(triaged);
-      setLoading(false);
-    };
-    run();
-  }, []);
-
-  const waitingNow = queue.filter((q) => q.status === "Waiting").length;
-
-  const stats: Stat[] = [
-    { label: "Waiting in OPD",  value: String(waitingNow), icon: ListOrdered,  tone: "primary" },
-    { label: "Triaged Today",   value: triagedToday === null ? "—" : String(triagedToday), icon: CheckCircle2, tone: "accent" },
-    { label: "Red Triage",      value: redCount === null ? "—" : String(redCount), icon: AlertTriangle, tone: "warning" },
-    { label: "Total Check-ins", value: checkInsToday === null ? "—" : String(checkInsToday), icon: Users, tone: "primary" },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Good morning, {name}. OPD triage overview for today.</p>
-      </div>
-      <UserCredentialCard name={name} role="Nurse" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <Card>
-        <CardHeader><CardTitle className="text-base">Current OPD Queue</CardTitle></CardHeader>
-        <CardContent>
-          {loading ? (
-            <TableSkeleton cols={5} rows={4} />
-          ) : queue.length === 0 ? (
-            <EmptyState icon={<ListOrdered className="h-6 w-6" />} title="Queue is empty" className="border-0" />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow><TableHead>Queue #</TableHead><TableHead>Patient</TableHead><TableHead>Triage</TableHead><TableHead>Wait</TableHead><TableHead>Status</TableHead></TableRow>
-              </TableHeader>
-              <TableBody>
-                {queue.map((q) => (
-                  <TableRow key={q.queueNo}>
-                    <TableCell className="font-mono text-xs">{q.queueNo}</TableCell>
-                    <TableCell className="font-medium">{q.patient}</TableCell>
-                    <TableCell><Badge variant="outline">{q.triage}</Badge></TableCell>
-                    <TableCell className="text-muted-foreground">{q.wait}</TableCell>
-                    <TableCell><Badge variant="outline" className={STATUS_CLASS[q.status] ?? ""}>{q.status}</Badge></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function PharmacistDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const { items: lowStockItems, loading: stockLoading } = useLowStock(4);
-  const [pending, setPending] = useState<
-    Array<{ patient: string; drug: string; dose: string; qty: string }>
-  >([]);
-  const [outOfStock, setOutOfStock] = useState<number | null>(null);
-  const [dispensedToday, setDispensedToday] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const run = async () => {
-      const since = startOfToday();
-      const [{ data: rxRows, error: rxError }, { data: stockRows }, { count: dispensedCount }] =
-        await Promise.all([
-          supabase
-            .from("prescriptions")
-            .select("patient_name, drug_name, dose, quantity")
-            .eq("dispensed", false)
-            .order("created_at", { ascending: false })
-            .limit(5),
-          supabase.from("pharmacy_drugs").select("stock"),
-          supabase
-            .from("prescriptions")
-            .select("id", { count: "exact", head: true })
-            .eq("dispensed", true)
-            .gte("dispensed_at", since),
-        ]);
-
-      if (rxError) {
-        console.error("Failed to load prescriptions:", rxError);
-        setPending([]);
-      } else {
-        setPending(
-          (rxRows ?? []).map((p) => ({
-            patient: p.patient_name,
-            drug: p.drug_name,
-            dose: p.dose,
-            qty: p.quantity,
-          })),
-        );
-      }
-
-      setOutOfStock((stockRows ?? []).filter((d) => d.stock === 0).length);
-      setDispensedToday(dispensedCount ?? 0);
-      setLoading(false);
-    };
-    run();
-  }, []);
-
-  const stats: Stat[] = [
-    { label: "Prescriptions to Dispense", value: String(pending.length), icon: Pill,          tone: "primary" },
-    { label: "Out of Stock",              value: outOfStock === null ? "—" : String(outOfStock), icon: AlertTriangle, tone: "warning" },
-    { label: "Low Stock Items",           value: String(lowStockItems.length), icon: AlertTriangle, tone: "accent" },
-    { label: "Dispensed Today",           value: dispensedToday === null ? "—" : String(dispensedToday), icon: CheckCircle2, tone: "primary" },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Good morning, {name}. Pharmacy workload for today.</p>
-      </div>
-      <UserCredentialCard name={name} role="Pharmacist" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Pending Prescriptions</CardTitle></CardHeader>
-          <CardContent>
-            {loading ? (
-              <TableSkeleton cols={4} rows={3} />
-            ) : pending.length === 0 ? (
-              <EmptyState icon={<Pill className="h-6 w-6" />} title="No pending prescriptions" className="border-0" />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow><TableHead>Patient</TableHead><TableHead>Drug</TableHead><TableHead>Dose</TableHead><TableHead>Qty</TableHead></TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pending.map((p) => (
-                    <TableRow key={p.patient + p.drug}>
-                      <TableCell className="font-medium">{p.patient}</TableCell>
-                      <TableCell className="text-sm">{p.drug}</TableCell>
-                      <TableCell className="text-muted-foreground">{p.dose}</TableCell>
-                      <TableCell>{p.qty}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Low Stock Alerts</CardTitle>
-            <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{lowStockItems.length} items</Badge>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {stockLoading ? (
-              <TableSkeleton cols={2} rows={4} />
-            ) : lowStockItems.length === 0 ? (
-              <EmptyState icon={<AlertTriangle className="h-6 w-6" />} title="No low stock items" className="border-0" />
-            ) : (
-              lowStockItems.map((d) => (
-                <div key={d.name} className="flex items-start justify-between gap-3 rounded-md border bg-card p-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{d.name}</p>
-                    <p className="text-xs text-muted-foreground">{d.qty} {d.unit} remaining</p>
-                  </div>
-                  <Badge variant="outline" className="shrink-0 border-destructive/30 bg-destructive/10 text-destructive">
-                    <AlertTriangle className="mr-1 h-3 w-3" />Low
-                  </Badge>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function LabDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const [orders, setOrders] = useState<
-    Array<{ id: string; orderNo: string; patient: string; tests: string[]; priority: LabPriority; status: LabOrderStatus }>
-  >([]);
-  const [criticalResults, setCriticalResults] = useState<
-    Array<{ patient: string; test: string; result: string; flag: string }>
-  >([]);
-  const [completedToday, setCompletedToday] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const run = async () => {
-      const since = startOfToday();
-      const [{ data: orderRows, error: orderError }, { data: critRows, error: critError }, { count: completedCount }] =
-        await Promise.all([
-          supabase
-            .from("lab_orders")
-            .select("id, order_no, patient_name, tests, priority, status")
-            .neq("status", "Completed")
-            .order("created_at", { ascending: false })
-            .limit(8),
-          supabase
-            .from("lab_results")
-            .select("test_name, result, flag, lab_orders(patient_name)")
-            .eq("is_critical", true)
-            .order("created_at", { ascending: false })
-            .limit(5),
-          supabase
-            .from("lab_orders")
-            .select("id", { count: "exact", head: true })
-            .eq("status", "Completed")
-            .gte("updated_at", since),
-        ]);
-
-      if (orderError) {
-        console.error("Failed to load lab orders:", orderError);
-        setOrders([]);
-      } else {
-        setOrders(
-          (orderRows ?? []).map((o) => ({
-            id: o.id,
-            orderNo: o.order_no,
-            patient: o.patient_name,
-            tests: o.tests,
-            priority: o.priority,
-            status: o.status,
-          })),
-        );
-      }
-
-      if (critError) {
-        console.error("Failed to load critical results:", critError);
-        setCriticalResults([]);
-      } else {
-        type CritJoinRow = { test_name: string; result: string; flag: string; lab_orders: { patient_name: string } | null };
-        const rows = (critRows ?? []) as unknown as CritJoinRow[];
-        setCriticalResults(
-          rows.map((r) => ({
-            patient: r.lab_orders?.patient_name ?? "—",
-            test: r.test_name,
-            result: r.result,
-            flag: r.flag,
-          })),
-        );
-      }
-
-      setCompletedToday(completedCount ?? 0);
-      setLoading(false);
-    };
-    run();
-  }, []);
-
-  const pending = orders.filter((o) => o.status === "Pending").length;
-  const processing = orders.filter((o) => o.status === "Processing").length;
-
-  const stats: Stat[] = [
-    { label: "Pending Orders",   value: String(pending),                  icon: FlaskConical, tone: "primary" },
-    { label: "Processing",       value: String(processing),               icon: Clock,        tone: "accent" },
-    { label: "Critical Results", value: String(criticalResults.length),   icon: AlertTriangle, tone: "warning" },
-    { label: "Completed Today",  value: completedToday === null ? "—" : String(completedToday), icon: CheckCircle2, tone: "primary" },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Good morning, {name}. Lab workload for today.</p>
-      </div>
-      <UserCredentialCard name={name} role="Lab Technician" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Active Lab Orders</CardTitle></CardHeader>
-          <CardContent>
-            {loading ? (
-              <TableSkeleton cols={5} rows={4} />
-            ) : orders.length === 0 ? (
-              <EmptyState icon={<FlaskConical className="h-6 w-6" />} title="No active lab orders" className="border-0" />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow><TableHead>Order #</TableHead><TableHead>Patient</TableHead><TableHead>Tests</TableHead><TableHead>Priority</TableHead><TableHead>Status</TableHead></TableRow>
-                </TableHeader>
-                <TableBody>
-                  {orders.map((o) => (
-                    <TableRow key={o.id}>
-                      <TableCell className="font-mono text-xs">{o.orderNo}</TableCell>
-                      <TableCell className="font-medium">{o.patient}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{o.tests.join(", ")}</TableCell>
-                      <TableCell><Badge variant="outline">{o.priority}</Badge></TableCell>
-                      <TableCell><Badge variant="outline">{o.status}</Badge></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              Critical Results
-              <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{criticalResults.length}</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {loading ? (
-              <TableSkeleton cols={1} rows={3} />
-            ) : criticalResults.length === 0 ? (
-              <EmptyState icon={<AlertTriangle className="h-6 w-6" />} title="No critical results" className="border-0" />
-            ) : (
-              criticalResults.map((r) => (
-                <div key={r.patient + r.test} className="rounded-md border border-destructive/20 bg-destructive/5 p-3">
-                  <p className="text-sm font-medium">{r.patient}</p>
-                  <p className="text-xs">{r.test}: <span className="font-semibold text-destructive">{r.result}</span> — <span className="text-destructive">{r.flag}</span></p>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function FinanceDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const [todaysRevenue, setTodaysRevenue] = useState<number | null>(null);
-  const [pendingBilling, setPendingBilling] = useState<
-    Array<{ receipt: string; patient: string; amount: number; method: string }>
-  >([]);
-  const [nhifPending, setNhifPending] = useState<number | null>(null);
-  const [transactionsToday, setTransactionsToday] = useState<number | null>(null);
-  const [revenue, setRevenue] = useState<{ method: string; amount: number }[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const run = async () => {
-      const since = startOfToday();
-      const [
-        { data: todayTx, error: todayError },
-        { data: pendingRows, error: pendingError },
-        { count: nhifCount },
-      ] = await Promise.all([
-        supabase.from("billing_transactions").select("amount, method").gte("created_at", since),
-        supabase
-          .from("billing_transactions")
-          .select("receipt_no, patient_name, amount, method")
-          .eq("status", "Pending")
-          .order("created_at", { ascending: false })
-          .limit(5),
-        supabase.from("nhif_claims").select("id", { count: "exact", head: true }).eq("status", "Submitted"),
-      ]);
-
-      if (todayError) {
-        console.error("Failed to load today's transactions:", todayError);
-        setTodaysRevenue(0);
-        setTransactionsToday(0);
-        setRevenue([]);
-      } else {
-        const rows = todayTx ?? [];
-        setTodaysRevenue(rows.reduce((sum, r) => sum + Number(r.amount), 0));
-        setTransactionsToday(rows.length);
-        const byMethod = new Map<string, number>();
-        for (const r of rows) byMethod.set(r.method, (byMethod.get(r.method) ?? 0) + Number(r.amount));
-        setRevenue(Array.from(byMethod.entries()).map(([method, amount]) => ({ method, amount })));
-      }
-
-      if (pendingError) {
-        console.error("Failed to load pending billing:", pendingError);
-        setPendingBilling([]);
-      } else {
-        setPendingBilling(
-          (pendingRows ?? []).map((b) => ({
-            receipt: b.receipt_no,
-            patient: b.patient_name,
-            amount: Number(b.amount),
-            method: b.method,
-          })),
-        );
-      }
-
-      setNhifPending(nhifCount ?? 0);
-      setLoading(false);
-    };
-    run();
-  }, []);
-
-  const stats: Stat[] = [
-    { label: "Today's Revenue",     value: todaysRevenue === null ? "—" : `KES ${todaysRevenue.toLocaleString()}`, icon: Receipt, tone: "primary" },
-    { label: "Pending Payments",    value: String(pendingBilling.length), icon: Clock,       tone: "warning" },
-    { label: "NHIF Claims Pending", value: nhifPending === null ? "—" : String(nhifPending), icon: AlertTriangle, tone: "accent" },
-    { label: "Transactions Today",  value: transactionsToday === null ? "—" : String(transactionsToday), icon: CheckCircle2, tone: "primary" },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Good morning, {name}. Revenue and billing overview.</p>
-      </div>
-      <UserCredentialCard name={name} role="Finance Officer" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Revenue by Payment Method (Today)</CardTitle></CardHeader>
-          <CardContent className="h-64">
-            {loading ? (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading…</div>
-            ) : revenue.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">No transactions recorded today yet.</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={revenue} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                  <XAxis dataKey="method" stroke="var(--color-muted-foreground)" fontSize={12} />
-                  <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => `KES ${v.toLocaleString()}`} />
-                  <Bar dataKey="amount" fill="var(--color-primary)" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-base">Pending Payments</CardTitle></CardHeader>
-          <CardContent>
-            {loading ? (
-              <TableSkeleton cols={4} rows={3} />
-            ) : pendingBilling.length === 0 ? (
-              <EmptyState icon={<Receipt className="h-6 w-6" />} title="No pending payments" className="border-0" />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow><TableHead>Receipt</TableHead><TableHead>Patient</TableHead><TableHead>Amount</TableHead><TableHead>Method</TableHead></TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pendingBilling.map((b) => (
-                    <TableRow key={b.receipt}>
-                      <TableCell className="font-mono text-xs">{b.receipt}</TableCell>
-                      <TableCell className="font-medium">{b.patient}</TableCell>
-                      <TableCell>KES {b.amount.toLocaleString()}</TableCell>
-                      <TableCell>{b.method}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-// ── Root router ────────────────────────────────────────────────────
-function Dashboard() {
-  const { user } = useAuth();
-
-  if (!user) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading your dashboard…</p>
-      </div>
-    );
-  }
-
-  // All user credentials come directly from the Supabase profile
-  const props = {
-    name:       user.name,
-    email:      user.email,
-    department: user.department,
-    facility:   user.facility,
-    phone:      user.phone,
-    initials:   user.initials,
-  };
-
-  switch (user.role) {
-    case "Admin":          return <AdminDashboard      {...props} />;
-    case "Clinician":      return <ClinicianDashboard  {...props} />;
-    case "Doctor":         return <DoctorDashboard     {...props} />;
-    case "Nurse":          return <NurseDashboard       {...props} />;
-    case "Pharmacist":     return <PharmacistDashboard  {...props} />;
-    case "Lab Technician": return <LabDashboard          {...props} />;
-    case "Finance Officer":return <FinanceDashboard      {...props} />;
-    default:
-      return (
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <p className="text-sm text-muted-foreground">No dashboard available for your role.</p>
+    <section className="bg-[#0057A8] py-14">
+      <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 px-4 text-center sm:flex-row sm:text-left sm:px-6 lg:px-8">
+        <div>
+          <h3 className="text-2xl font-bold text-white">Ready to sign in?</h3>
+          <p className="mt-1 text-white/80">
+            Access your role's dashboard or request a new staff account.
+          </p>
         </div>
-      );
-  }
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button asChild size="lg" className="bg-white text-[#0057A8] hover:bg-white/90">
+            <Link to="/login">
+              <Stethoscope className="mr-1.5 h-4 w-4" /> Staff Login
+            </Link>
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
 }
 
-function DoctorDashboard({ name, email, department, facility, phone, initials }: {
-  name: string; email: string; department: string | null; facility: string; phone: string | null; initials: string;
-}) {
-  const [queue, setQueue] = useState<
-    Array<{ queueNo: string; patient: string; patientId: string | null; triage: Triage; wait: string; status: string }>
-  >([]);
-  const [criticalResults, setCriticalResults] = useState<
-    Array<{ patient: string; test: string; result: string }>
-  >([]);
-  const [prescriptionsToday, setPrescriptionsToday] = useState<number | null>(null);
-  const [diagnosesToday, setDiagnosesToday] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
+// ── Footer ───────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    const run = async () => {
-      const since = startOfToday();
-      const [
-        { data: queueRows, error: queueError },
-        { data: critRows, error: critError },
-        { count: rxCount },
-        { count: dxCount },
-      ] = await Promise.all([
-        supabase
-          .from("opd_queue")
-          .select("queue_no, patient_name, patient_id, check_in_time, triage, status")
-          .neq("status", "Done")
-          .order("check_in_time", { ascending: true })
-          .limit(6),
-        supabase
-          .from("lab_results")
-          .select("test_name, result, lab_orders(patient_name)")
-          .eq("is_critical", true)
-          .order("created_at", { ascending: false })
-          .limit(5),
-        supabase.from("prescriptions").select("id", { count: "exact", head: true }).gte("created_at", since),
-        supabase.from("diagnoses").select("id", { count: "exact", head: true }).gte("created_at", since),
-      ]);
-
-      if (queueError) {
-        console.error("Failed to load queue:", queueError);
-        setQueue([]);
-      } else {
-        setQueue(
-          (queueRows ?? []).map((q) => ({
-            queueNo: q.queue_no,
-            patient: q.patient_name,
-            patientId: q.patient_id ?? null,
-            triage: q.triage,
-            wait: fmtWait(q.check_in_time),
-            status: q.status,
-          })),
-        );
-      }
-
-      if (critError) {
-        console.error("Failed to load critical results:", critError);
-        setCriticalResults([]);
-      } else {
-        type CritJoinRow = { test_name: string; result: string; lab_orders: { patient_name: string } | null };
-        const rows = (critRows ?? []) as unknown as CritJoinRow[];
-        setCriticalResults(
-          rows.map((r) => ({
-            patient: r.lab_orders?.patient_name ?? "—",
-            test: r.test_name,
-            result: r.result,
-          })),
-        );
-      }
-
-      setPrescriptionsToday(rxCount ?? 0);
-      setDiagnosesToday(dxCount ?? 0);
-      setLoading(false);
-    };
-    run();
-  }, []);
-
-  const stats: Stat[] = [
-    { label: "OPD Waiting",          value: String(queue.length),                                     icon: ListOrdered,  tone: "primary" },
-    { label: "Critical Lab Results", value: String(criticalResults.length),                           icon: FlaskConical, tone: "warning" },
-    { label: "Diagnoses Today",      value: diagnosesToday === null ? "—" : String(diagnosesToday),   icon: Activity,     tone: "primary" },
-    { label: "Prescriptions Today",  value: prescriptionsToday === null ? "—" : String(prescriptionsToday), icon: Pill, tone: "primary" },
-  ];
-
+function Footer() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Doctor Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Good morning, Dr. {name.split(" ")[0]}. Your clinical workspace for today.
-        </p>
-      </div>
-      <UserCredentialCard name={name} role="Doctor" email={email} department={department} facility={facility} phone={phone} initials={initials} />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => <StatCard key={s.label} s={s} />)}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-            <CardTitle className="text-base">OPD Queue</CardTitle>
-            <Link to="/clinical" className="text-xs text-primary underline-offset-2 hover:underline">
-              Open Clinical Workspace →
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <TableSkeleton cols={4} rows={4} />
-            ) : queue.length === 0 ? (
-              <EmptyState icon={<ListOrdered className="h-6 w-6" />} title="Queue is empty" className="border-0" />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Queue #</TableHead>
-                    <TableHead>Patient</TableHead>
-                    <TableHead>Triage</TableHead>
-                    <TableHead>Wait</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {queue.map((q) => (
-                    <TableRow key={q.queueNo}>
-                      <TableCell className="font-mono text-xs">{q.queueNo}</TableCell>
-                      <TableCell className="font-medium">
-                        {q.patientId ? (
-                          <Link
-                            to="/clinical/$patientId"
-                            params={{ patientId: q.patientId }}
-                            className="text-primary hover:underline underline-offset-2"
-                          >
-                            {q.patient}
-                          </Link>
-                        ) : (
-                          q.patient
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={
-                          q.triage === "Red" ? "border-red-500/30 bg-red-500/10 text-red-700"
-                          : q.triage === "Orange" ? "border-orange-500/30 bg-orange-500/10 text-orange-700"
-                          : ""
-                        }>
-                          {q.triage}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">{q.wait}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+    <footer id="contact" className="bg-[#0a1f33] py-12 text-white">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 gap-10 sm:grid-cols-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white text-[#0057A8] font-bold">
+                A
+              </div>
+              <span className="text-base font-semibold">AfyaLink HMS</span>
+            </div>
+            <p className="mt-3 max-w-xs text-sm text-white/60">
+              A digital hospital management system for Kapsabet County
+              Referral Hospital, Republic of Kenya.
+            </p>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              Critical Lab Results
-              {criticalResults.length > 0 && (
-                <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">
-                  {criticalResults.length} critical
-                </Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {loading ? (
-              <TableSkeleton cols={1} rows={3} />
-            ) : criticalResults.length === 0 ? (
-              <EmptyState icon={<FlaskConical className="h-6 w-6" />} title="No critical results" className="border-0" />
-            ) : (
-              criticalResults.map((r) => (
-                <div key={r.patient + r.test} className="rounded-md border border-destructive/20 bg-destructive/5 p-3">
-                  <p className="text-sm font-medium">{r.patient}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {r.test}: <span className="font-semibold text-destructive">{r.result}</span>
-                  </p>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+          <div>
+            <p className="text-sm font-semibold text-white/90">Facility</p>
+            <ul className="mt-3 space-y-2 text-sm text-white/60">
+              <li className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 shrink-0" /> Kapsabet, Nandi County, Kenya
+              </li>
+              <li className="flex items-center gap-2">
+                <Phone className="h-4 w-4 shrink-0" /> +254 (0) 53 522 0000
+              </li>
+              <li className="flex items-center gap-2">
+                <Mail className="h-4 w-4 shrink-0" /> info@kapsabethospital.go.ke
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <p className="text-sm font-semibold text-white/90">Quick links</p>
+            <ul className="mt-3 space-y-2 text-sm text-white/60">
+              <li><a href="#modules" className="hover:text-white">Modules</a></li>
+              <li><a href="#about" className="hover:text-white">About</a></li>
+              <li><Link to="/login" className="hover:text-white">Staff Login</Link></li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="mt-10 border-t border-white/10 pt-6 text-center text-xs text-white/50">
+          Ministry of Health · Republic of Kenya — © {new Date().getFullYear()} AfyaLink HMS
+        </div>
       </div>
+    </footer>
+  );
+}
+
+// ── Page ─────────────────────────────────────────────────────────────
+
+function LandingPage() {
+  return (
+    <div className="min-h-screen bg-white">
+      <Navbar />
+      <Hero />
+      <Modules />
+      <About />
+      <CtaBanner />
+      <Footer />
     </div>
   );
 }
