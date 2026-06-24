@@ -1,18 +1,29 @@
+/**
+ * src/routes/patients.tsx
+ *
+ * Same Outlet fix applied as clinical.tsx:
+ * patients.$patientId.tsx is a child route of patients.tsx in TanStack Router's
+ * file-based routing. Without <Outlet/> in the parent, navigating to
+ * /patients/$patientId renders the patients list instead of the patient record.
+ */
+
 import { useEffect, useMemo, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { Search, UserPlus, Eye, Pencil, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  createFileRoute,
+  Link,
+  Outlet,
+  useChildMatches,
+} from "@tanstack/react-router";
+import {
+  Search, UserPlus, Eye, Pencil, ChevronLeft, ChevronRight,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { RegisterPatientSheet } from "@/components/patients/RegisterPatientSheet";
 import { supabase } from "@/integrations/supabase/client";
@@ -43,8 +54,26 @@ export const Route = createFileRoute("/patients")({
   head: () => ({
     meta: [{ title: "Patients · AfyaLink HMS" }],
   }),
-  component: PatientsPage,
+  component: PatientsLayout,
 });
+
+/**
+ * PatientsLayout
+ *
+ * Layout wrapper for the /patients route family.
+ * - On /patients            → renders PatientsPage (the patient list)
+ * - On /patients/$patientId → renders <Outlet/> which mounts the patient record page
+ */
+function PatientsLayout() {
+  const childMatches = useChildMatches();
+  const onChildRoute = childMatches.length > 0;
+
+  if (onChildRoute) {
+    return <Outlet />;
+  }
+
+  return <PatientsPage />;
+}
 
 const PAGE_SIZE = 5;
 
@@ -197,7 +226,10 @@ function PatientsPage() {
               ))}
               {slice.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
+                  <TableCell
+                    colSpan={8}
+                    className="py-12 text-center text-sm text-muted-foreground"
+                  >
                     {loading ? "Loading records…" : "No patients found"}
                   </TableCell>
                 </TableRow>
