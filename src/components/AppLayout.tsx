@@ -15,10 +15,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
 
-  const isPublic = pathname === "/login";
+  // "/" is the public marketing landing page and "/login" is the
+  // sign-in/sign-up screen — both are reachable without a session.
+  const isPublic = pathname === "/" || pathname === "/login";
 
   useEffect(() => {
-    if (!loading && !user && !isPublic) navigate({ to: "/login" });
+    if (loading) return;
+    // Logged-out users trying to reach a protected route get sent to /login.
+    if (!user && !isPublic) { navigate({ to: "/login" }); return; }
+    // Logged-in users who land on the marketing page or the login screen
+    // are sent straight to their dashboard instead.
+    if (user && isPublic) { navigate({ to: "/dashboard" }); return; }
   }, [user, loading, isPublic, navigate]);
 
   if (loading) {
@@ -29,13 +36,31 @@ export function AppLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  if (isPublic || !user) {
+  if (isPublic && !user) {
     return (
       <>
         <OfflineIndicator />
         {children}
         <Toaster richColors position="top-right" />
       </>
+    );
+  }
+
+  if (!user) {
+    // Mid-redirect to /login.
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-sm text-muted-foreground">Loading…</div>
+      </div>
+    );
+  }
+
+  if (isPublic) {
+    // Logged in, but still on "/" or "/login" — mid-redirect to /dashboard.
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-sm text-muted-foreground">Loading…</div>
+      </div>
     );
   }
 
