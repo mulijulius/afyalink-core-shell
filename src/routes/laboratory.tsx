@@ -1,14 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState, useEffect, useCallback } from "react";
-import { AlertTriangle, Check, FlaskConical, Plus, Printer, Search } from "lucide-react";
+import { useMemo, useState, useEffect, useCallback, useRef, type ChangeEvent } from "react";
+import { AlertTriangle, Camera, Check, ClipboardList, FlaskConical, ImagePlus, Plus, Printer, Search, X } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
@@ -55,6 +57,8 @@ type LabResultRow = {
   is_critical: boolean;
   verified_by_name: string | null;
   sample_id: string | null;
+  image_url: string | null;
+  notes: string | null;
   created_at: string;
   // joined from lab_orders for display
   patient_name?: string;
@@ -253,6 +257,277 @@ function NewOrderDialog({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+/**
+ * Lets a Lab Technician record a result against a specific test on an
+ * order — either by typing the value in manually, attaching/capturing a
+ * photo of the physical result (strip, slide, printout), or both.
+ *
+ * Camera access uses a plain <input type="file" accept="image/*" capture
+ * "environment">, which is the standard dependency-free way to open the
+ * device's rear camera directly on a phone/tablet; on desktop it falls
+ * back to a normal file picker. No extra permissions/SDK needed.
+ */
+function RecordResultDialog({
+  order,
+  test,
+  onSaved,
+}: {
+  order: LabOrderRow;
+  test: string;
+  onSaved: () => void;
+}) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [result, setResult] = useState("");
+  const [referenceRange, setReferenceRange] = useState("");
+  const [flag, setFlag] = useState<ResultFlag>("Normal");
+  const [critical, setCritical] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const reset = () => {
+    setResult("");
+    setReferenceRange("");
+    setFlag("Normal");
+    setCritical(false);
+    setNotes("");
+    setImageFile(null);
+    setImagePreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
+  const handlePickImage = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow picking the same file again later
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file");
+      return;
+    }
+    setImageFile(file);
+    setImagePreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+  };
+
+  const clearImage = () => {
+    setImageFile(null);
+    setImagePreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
+  const submit = async () => {
+    const hasTypedResult = result.trim().length > 0;
+    if (!hasTypedResult && !imageFile) {
+      toast.error("Enter a result value or attach an image");
+      return;
+    }
+    setSaving(true);
+    try {
+      let image_url: string | null = null;
+      let image_path: string | null = null;
+
+      if (imageFile) {
+        const ext = imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
+        const path = `${order.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from("lab-result-images")
+          .upload(path, imageFile, { contentType: imageFile.type });
+        if (uploadError) {
+          console.error("Failed to upload result image:", uploadError);
+          toast.error("Failed to upload image");
+          setSaving(false);
+          return;
+        }
+        const { data: publicUrlData } = supabase.storage
+          .from("lab-result-images")
+          .getPublicUrl(path);
+        image_url = publicUrlData.publicUrl;
+        image_path = path;
+      }
+
+      const { error } = await supabase.from("lab_results").insert({
+        order_id: order.id,
+        test_name: test,
+        result: hasTypedResult ? result.trim() : "See attached image",
+        reference_range: referenceRange.trim() || null,
+        flag,
+        is_critical: critical,
+        verified_by: user?.id ?? null,
+        verified_by_name: user?.name ?? null,
+        entered_by: user?.id ?? null,
+        entered_by_name: user?.name ?? null,
+        notes: notes.trim() || null,
+        image_url,
+        image_path,
+      });
+      if (error) {
+        console.error("Failed to record lab result:", error);
+        toast.error("Failed to record result");
+        return;
+      }
+
+      // Move the order along automatically: Pending/Collected → Processing,
+      // and once every ordered test has at least one result, → Completed.
+      const { data: existingResults } = await supabase
+        .from("lab_results")
+        .select("test_name")
+        .eq("order_id", order.id);
+      const recordedTests = new Set([...(existingResults ?? []).map((r) => r.test_name), test]);
+      const allDone = order.tests.every((t) => recordedTests.has(t));
+      const nextStatus: LabOrderStatus = allDone ? "Completed" : "Processing";
+      if (nextStatus !== order.status) {
+        await supabase.from("lab_orders").update({ status: nextStatus }).eq("id", order.id);
+      }
+
+      toast.success(`Result recorded for ${test}`);
+      reset();
+      setOpen(false);
+      onSaved();
+    } catch (err) {
+      console.error(err);
+      toast.error("Error recording result");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className="h-7">
+          <ClipboardList className="h-3.5 w-3.5 mr-1" /> Record
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Record Result — {test}</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="rounded-md border bg-muted/40 p-3 text-sm">
+            <p className="font-medium">{order.patient_name}</p>
+            <p className="text-xs text-muted-foreground">
+              Order {order.order_no} • Ordered by {order.ordered_by_name ?? "—"}
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Result value</Label>
+            <Input
+              placeholder="e.g. 9.2 g/dL, P. falciparum +, Negative…"
+              value={result}
+              onChange={(e) => setResult(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Leave blank if you're only attaching a photo of the result.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Reference range</Label>
+              <Input
+                placeholder="e.g. 12.0 – 16.0 g/dL"
+                value={referenceRange}
+                onChange={(e) => setReferenceRange(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Flag</Label>
+              <Select value={flag} onValueChange={(v) => setFlag(v as ResultFlag)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Normal">Normal</SelectItem>
+                  <SelectItem value="High">High</SelectItem>
+                  <SelectItem value="Low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <div>
+              <Label className="text-sm">Mark as critical value</Label>
+              <p className="text-xs text-muted-foreground">Flags this result for urgent clinician review.</p>
+            </div>
+            <Switch checked={critical} onCheckedChange={setCritical} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Notes (optional)</Label>
+            <Textarea
+              placeholder="Any observations for the requesting clinician…"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Attach result image (optional)</Label>
+            {imagePreview ? (
+              <div className="relative w-full max-w-xs">
+                <img src={imagePreview} alt="Captured result" className="rounded-md border max-h-56 w-full object-cover" />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="destructive"
+                  className="absolute -top-2 -right-2 h-6 w-6 rounded-full"
+                  onClick={clearImage}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => cameraInputRef.current?.click()}>
+                  <Camera className="h-4 w-4 mr-1.5" /> Take Photo
+                </Button>
+                <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                  <ImagePlus className="h-4 w-4 mr-1.5" /> Upload Image
+                </Button>
+              </div>
+            )}
+            {/* capture="environment" opens the rear camera directly on mobile devices */}
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handlePickImage}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePickImage}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button className="bg-[#0057A8] hover:bg-[#0057A8]/90" onClick={submit} disabled={saving}>
+            {saving ? "Saving…" : "Save Result"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function LaboratoryPage() {
   const [orders, setOrders] = useState<LabOrderRow[]>([]);
   const [results, setResults] = useState<LabResultRow[]>([]);
@@ -280,7 +555,7 @@ function LaboratoryPage() {
     const { data, error } = await supabase
       .from("lab_results")
       .select(
-        "id, order_id, test_name, result, reference_range, flag, is_critical, verified_by_name, sample_id, created_at, lab_orders(patient_name)",
+        "id, order_id, test_name, result, reference_range, flag, is_critical, verified_by_name, sample_id, image_url, notes, created_at, lab_orders(patient_name)",
       )
       .order("created_at", { ascending: false });
     if (error) {
@@ -298,6 +573,8 @@ function LaboratoryPage() {
         is_critical: boolean;
         verified_by_name: string | null;
         sample_id: string | null;
+        image_url: string | null;
+        notes: string | null;
         created_at: string;
         lab_orders: { patient_name: string } | null;
       };
@@ -312,6 +589,8 @@ function LaboratoryPage() {
         is_critical: r.is_critical,
         verified_by_name: r.verified_by_name,
         sample_id: r.sample_id,
+        image_url: r.image_url,
+        notes: r.notes,
         created_at: r.created_at,
         patient_name: r.lab_orders?.patient_name ?? "—",
       }));
@@ -326,6 +605,17 @@ function LaboratoryPage() {
   }, [fetchOrders, fetchResults]);
 
   const criticals = useMemo(() => results.filter((r) => r.is_critical), [results]);
+
+  // Which tests (per order) already have a recorded result — used to show
+  // "Recorded" vs a "Record" action for each individual test on an order.
+  const recordedTestsByOrder = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const r of results) {
+      if (!map.has(r.order_id)) map.set(r.order_id, new Set());
+      map.get(r.order_id)!.add(r.test_name);
+    }
+    return map;
+  }, [results]);
 
   // Sample tracking is derived from existing orders, mapping each order's
   // lab_order_status onto the physical sample journey stages.
@@ -391,7 +681,27 @@ function LaboratoryPage() {
                       <TableRow key={o.id}>
                         <TableCell className="font-mono text-xs">{o.order_no}</TableCell>
                         <TableCell className="font-medium">{o.patient_name}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground max-w-[260px]">{o.tests.join(", ")}</TableCell>
+                        <TableCell className="max-w-[300px]">
+                          <div className="flex flex-wrap gap-1.5">
+                            {o.tests.map((t) => {
+                              const isRecorded = recordedTestsByOrder.get(o.id)?.has(t) ?? false;
+                              return isRecorded ? (
+                                <Badge key={t} variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs">
+                                  <Check className="h-3 w-3 mr-1" /> {t}
+                                </Badge>
+                              ) : (
+                                <div key={t} className="flex items-center gap-1">
+                                  <span className="text-xs text-muted-foreground">{t}</span>
+                                  <RecordResultDialog
+                                    order={o}
+                                    test={t}
+                                    onSaved={() => { fetchOrders(); fetchResults(); }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </TableCell>
                         <TableCell>{o.ordered_by_name ?? "—"}</TableCell>
                         <TableCell>{fmtTime(o.created_at)}</TableCell>
                         <TableCell><Badge variant="outline" className={priorityClass(o.priority)}>{o.priority}</Badge></TableCell>
@@ -426,8 +736,8 @@ function LaboratoryPage() {
                             </SelectContent>
                           </Select>
                         </TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="sm">View</Button>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {(recordedTestsByOrder.get(o.id)?.size ?? 0)} / {o.tests.length} recorded
                         </TableCell>
                       </TableRow>
                     ))}
@@ -469,6 +779,7 @@ function LaboratoryPage() {
                       <TableHead>Result</TableHead>
                       <TableHead>Reference Range</TableHead>
                       <TableHead>Flag</TableHead>
+                      <TableHead>Image</TableHead>
                       <TableHead>Verified By</TableHead>
                       <TableHead>Time</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
@@ -482,9 +793,24 @@ function LaboratoryPage() {
                           <TableCell className="font-mono text-xs">{r.order_id.slice(0, 8)}</TableCell>
                           <TableCell className="font-medium">{r.patient_name}</TableCell>
                           <TableCell>{r.test_name}</TableCell>
-                          <TableCell className={abnormal ? "font-semibold text-red-700" : ""}>{r.result}</TableCell>
+                          <TableCell className={abnormal ? "font-semibold text-red-700" : ""} title={r.notes ?? undefined}>
+                            {r.result}
+                          </TableCell>
                           <TableCell className="text-muted-foreground">{r.reference_range ?? "—"}</TableCell>
                           <TableCell><Badge variant="outline" className={flagClass(r.flag)}>{r.flag}</Badge></TableCell>
+                          <TableCell>
+                            {r.image_url ? (
+                              <a href={r.image_url} target="_blank" rel="noopener noreferrer" title="Open full-size image">
+                                <img
+                                  src={r.image_url}
+                                  alt={`${r.test_name} result`}
+                                  className="h-10 w-10 rounded border object-cover hover:ring-2 hover:ring-[#0057A8] transition"
+                                />
+                              </a>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
                           <TableCell>{r.verified_by_name ?? "—"}</TableCell>
                           <TableCell>{fmtTime(r.created_at)}</TableCell>
                           <TableCell className="text-right">
