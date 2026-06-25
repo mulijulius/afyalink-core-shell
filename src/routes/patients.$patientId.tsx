@@ -68,6 +68,7 @@ type PatientProfileLab = {
   test: string;
   result: string;
   status: "Normal" | "Abnormal";
+  imageUrl: string | null;
 };
 
 type PatientProfileBilling = {
@@ -175,7 +176,7 @@ export const Route = createFileRoute("/patients/$patientId")({
       orderIds.length > 0
         ? await supabase
             .from("lab_results")
-            .select("test_name, result, flag, created_at")
+            .select("test_name, result, flag, image_url, created_at")
             .in("order_id", orderIds)
             .order("created_at", { ascending: false })
         : { data: [], error: null };
@@ -189,6 +190,7 @@ export const Route = createFileRoute("/patients/$patientId")({
       test: result.test_name,
       result: result.result,
       status: result.flag === "Normal" ? "Normal" : "Abnormal",
+      imageUrl: result.image_url,
     }));
 
     return {
@@ -380,6 +382,7 @@ function PatientProfile() {
                       <TableHead>Test</TableHead>
                       <TableHead>Result</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Image</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -399,6 +402,15 @@ function PatientProfile() {
                           >
                             {l.status}
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {l.imageUrl ? (
+                            <a href={l.imageUrl} target="_blank" rel="noopener noreferrer" title="Open full-size image">
+                              <img src={l.imageUrl} alt={`${l.test} result`} className="h-9 w-9 rounded border object-cover" />
+                            </a>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
