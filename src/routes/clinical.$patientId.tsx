@@ -114,6 +114,8 @@ type LabResultRow = {
   flag: ResultFlag;
   is_critical: boolean;
   verified_by_name: string | null;
+  image_url: string | null;
+  notes: string | null;
   created_at: string;
 };
 
@@ -274,7 +276,7 @@ function ConsultationWorkspace() {
     if (orderIds.length > 0) {
       const { data: results, error } = await supabase
         .from("lab_results")
-        .select("id, order_id, test_name, result, reference_range, flag, is_critical, verified_by_name, created_at")
+        .select("id, order_id, test_name, result, reference_range, flag, is_critical, verified_by_name, image_url, notes, created_at")
         .in("order_id", orderIds)
         .order("created_at", { ascending: false });
       if (error) console.error("Failed to load lab results:", error.message);
@@ -1005,6 +1007,7 @@ function LabsTab({
                     <TableHead>Result</TableHead>
                     <TableHead>Reference Range</TableHead>
                     <TableHead>Flag</TableHead>
+                    <TableHead>Image</TableHead>
                     <TableHead>Verified By</TableHead>
                     <TableHead>Date</TableHead>
                   </TableRow>
@@ -1013,9 +1016,24 @@ function LabsTab({
                   {results.map((r) => (
                     <TableRow key={r.id} className={r.flag !== "Normal" ? "bg-red-50/40" : ""}>
                       <TableCell className="font-medium">{r.test_name}</TableCell>
-                      <TableCell className={r.flag !== "Normal" ? "font-semibold text-red-700" : ""}>{r.result}</TableCell>
+                      <TableCell className={r.flag !== "Normal" ? "font-semibold text-red-700" : ""} title={r.notes ?? undefined}>
+                        {r.result}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">{r.reference_range ?? "—"}</TableCell>
                       <TableCell><Badge variant="outline" className={flagClass(r.flag)}>{r.flag}</Badge></TableCell>
+                      <TableCell>
+                        {r.image_url ? (
+                          <a href={r.image_url} target="_blank" rel="noopener noreferrer" title="Open full-size image">
+                            <img
+                              src={r.image_url}
+                              alt={`${r.test_name} result`}
+                              className="h-10 w-10 rounded border object-cover hover:ring-2 hover:ring-[#0057A8] transition"
+                            />
+                          </a>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell>{r.verified_by_name ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{fmtDateTime(r.created_at)}</TableCell>
                     </TableRow>
