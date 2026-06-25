@@ -251,6 +251,11 @@ export type Database = {
           verified_by: string | null
           verified_by_name: string | null
           sample_id: string | null
+          image_url: string | null
+          image_path: string | null
+          notes: string | null
+          entered_by: string | null
+          entered_by_name: string | null
           created_at: string
         }
         Insert: {
@@ -264,6 +269,11 @@ export type Database = {
           verified_by?: string | null
           verified_by_name?: string | null
           sample_id?: string | null
+          image_url?: string | null
+          image_path?: string | null
+          notes?: string | null
+          entered_by?: string | null
+          entered_by_name?: string | null
           created_at?: string
         }
         Update: {
@@ -272,6 +282,11 @@ export type Database = {
           is_critical?: boolean
           verified_by?: string | null
           verified_by_name?: string | null
+          image_url?: string | null
+          image_path?: string | null
+          notes?: string | null
+          entered_by?: string | null
+          entered_by_name?: string | null
         }
         Relationships: [{ foreignKeyName: "lab_results_order_id_fkey"; columns: ["order_id"]; referencedRelation: "lab_orders"; referencedColumns: ["id"] }]
       }
